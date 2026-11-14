@@ -233,7 +233,7 @@ func (s *Service) RecordMediaEvidence(ctx context.Context, in RecordMediaEvidenc
 // CreatePayout creates a settlement payout batch for an operator.
 func (s *Service) CreatePayout(ctx context.Context, operatorID uuid.UUID, periodStart, periodEnd time.Time, grossAmountIDR decimal.Decimal, unitsPlanted, maintenanceTasks int32) (*store.OperatorPayouts, error) {
 	payoutID, _ := uuid.NewV7()
-	idempotencyKey := fmt.Sprintf("payout-%s-%s-%s", operatorID.String()[:8], periodStart.Format("20060102"), periodEnd.Format("20060102"))
+	idempotencyKey := fmt.Sprintf("payout-%s-%s-%s", operatorID.String(), periodStart.Format("20060102"), periodEnd.Format("20060102"))
 
 	var createdPayout store.OperatorPayouts
 	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -266,4 +266,40 @@ func (s *Service) CreatePayout(ctx context.Context, operatorID uuid.UUID, period
 	}
 
 	return &createdPayout, nil
+}
+
+// ApprovePayout approves a pending operator payout batch.
+func (s *Service) ApprovePayout(ctx context.Context, payoutID uuid.UUID) (*store.OperatorPayouts, error) {
+	payout, err := s.store.UpdateOperatorPayoutStatus(ctx, store.UpdateOperatorPayoutStatusParams{
+		ID:         payoutID,
+		Status:     store.PayoutStatusApproved,
+		ApprovedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPayoutNotFound
+		}
+		return nil, fmt.Errorf("failed to approve operator payout: %w", err)
+	}
+	return &payout, nil
+}
+
+// DisbursePayout records disbursement execution for an approved payout batch.
+func (s *Service) DisbursePayout(ctx context.Context, payoutID uuid.UUID, externalDisbursementID string) (*store.OperatorPayouts, error) {
+	if externalDisbursementID == "" {
+		externalDisbursementID = fmt.Sprintf("disb-xen-%d", time.Now().UnixNano())
+	}
+	payout, err := s.store.UpdateOperatorPayoutStatus(ctx, store.UpdateOperatorPayoutStatusParams{
+		ID:                     payoutID,
+		Status:                 store.PayoutStatusDisbursed,
+		DisbursedAt:            pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		ExternalDisbursementID: pgtype.Text{String: externalDisbursementID, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPayoutNotFound
+		}
+		return nil, fmt.Errorf("failed to disburse operator payout: %w", err)
+	}
+	return &payout, nil
 }

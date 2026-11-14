@@ -26,6 +26,7 @@ import (
 	"github.com/Drewron01/bioverse-backend/internal/platform/notification"
 	"github.com/Drewron01/bioverse-backend/internal/platform/payment"
 	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron01/bioverse-backend/internal/upload"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -162,6 +163,10 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		identityService := identity.NewService(db, queries, cfg)
 		identityHandler := identity.NewHandler(identityService)
 		identityHandler.RegisterRoutes(r, authMiddleware)
+
+		uploadService := upload.NewService("")
+		uploadHandler := upload.NewHandler(uploadService)
+		uploadHandler.RegisterRoutes(r, authMiddleware)
 
 		conservationService := conservation.NewService(db, queries)
 		conservationHandler := conservation.NewHandler(conservationService)

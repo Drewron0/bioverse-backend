@@ -28,6 +28,16 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 	r.Group(func(protected chi.Router) {
 		protected.Use(authMiddleware)
 
+		// Admin Field Operations routes
+		protected.Post("/v1/admin/fieldops/operators", h.handleRegisterOperator)
+		protected.Get("/v1/admin/fieldops/operators/{id}", h.handleGetOperator)
+		protected.Post("/v1/admin/fieldops/work-logs", h.handleRecordWorkLog)
+		protected.Post("/v1/admin/fieldops/media", h.handleRecordMedia)
+		protected.Post("/v1/admin/fieldops/payouts", h.handleCreatePayout)
+		protected.Post("/v1/admin/fieldops/payouts/{id}/approve", h.handleApprovePayout)
+		protected.Post("/v1/admin/fieldops/payouts/{id}/disburse", h.handleDisbursePayout)
+
+		// Backward-compatible app aliases
 		protected.Post("/v1/app/fieldops/operators", h.handleRegisterOperator)
 		protected.Get("/v1/app/fieldops/operators/{id}", h.handleGetOperator)
 		protected.Post("/v1/app/fieldops/work-logs", h.handleRecordWorkLog)
@@ -227,6 +237,55 @@ func (h *Handler) handleCreatePayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, payout)
+}
+
+func (h *Handler) handleApprovePayout(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	payoutID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid payout UUID", nil)
+		return
+	}
+
+	payout, err := h.service.ApprovePayout(r.Context(), payoutID)
+	if err != nil {
+		if errors.Is(err, ErrPayoutNotFound) {
+			httperr.NotFound(w, r, "Payout not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, payout)
+}
+
+type disbursePayoutRequest struct {
+	ExternalDisbursementID string `json:"external_disbursement_id,omitempty"`
+}
+
+func (h *Handler) handleDisbursePayout(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	payoutID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid payout UUID", nil)
+		return
+	}
+
+	var req disbursePayoutRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	payout, err := h.service.DisbursePayout(r.Context(), payoutID, req.ExternalDisbursementID)
+	if err != nil {
+		if errors.Is(err, ErrPayoutNotFound) {
+			httperr.NotFound(w, r, "Payout not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, payout)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

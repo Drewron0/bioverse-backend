@@ -28,6 +28,17 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 	r.Group(func(protected chi.Router) {
 		protected.Use(authMiddleware)
 
+		// Admin B2B & ESG endpoints
+		protected.Post("/v1/admin/b2b/companies", h.handleRegisterCompany)
+		protected.Get("/v1/admin/b2b/companies/{id}", h.handleGetCompany)
+		protected.Post("/v1/admin/b2b/companies/{id}/members", h.handleAddMember)
+		protected.Get("/v1/admin/b2b/companies/{id}/members", h.handleListMembers)
+		protected.Post("/v1/admin/b2b/companies/{id}/contracts", h.handleCreateContract)
+		protected.Post("/v1/admin/b2b/companies/{id}/esg/metrics", h.handleRecordESGMetric)
+		protected.Post("/v1/admin/b2b/companies/{id}/esg/reports", h.handleGenerateESGReport)
+		protected.Get("/v1/admin/b2b/companies/{id}/esg/reports", h.handleListESGReports)
+
+		// Backward-compatible B2B routes
 		protected.Post("/v1/b2b/companies", h.handleRegisterCompany)
 		protected.Get("/v1/b2b/companies/{id}", h.handleGetCompany)
 		protected.Post("/v1/b2b/companies/{id}/members", h.handleAddMember)
@@ -276,7 +287,13 @@ func (h *Handler) handleGenerateESGReport(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, rep)
+	receipt := map[string]any{
+		"report_id":      rep.ID,
+		"auditor_status": rep.AuditorStatus,
+		"message":        "ESG audit report compilation in progress.",
+		"created_at":     rep.CreatedAt,
+	}
+	writeJSON(w, http.StatusAccepted, receipt)
 }
 
 func (h *Handler) handleListESGReports(w http.ResponseWriter, r *http.Request) {
