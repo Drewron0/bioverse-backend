@@ -12,6 +12,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createAdminToken = `-- name: CreateAdminToken :one
+INSERT INTO admin_tokens (
+    id, admin_id, token_type, token_hash, device_info, ip_address, expires_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+) RETURNING id, admin_id, token_type, token_hash, expires_at
+`
+
+type CreateAdminTokenParams struct {
+	ID         uuid.UUID          `json:"id"`
+	AdminID    uuid.UUID          `json:"admin_id"`
+	TokenType  TokenTypeEnum      `json:"token_type"`
+	TokenHash  string             `json:"token_hash"`
+	DeviceInfo pgtype.Text        `json:"device_info"`
+	IpAddress  pgtype.Text        `json:"ip_address"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
+type CreateAdminTokenRow struct {
+	ID        uuid.UUID          `json:"id"`
+	AdminID   uuid.UUID          `json:"admin_id"`
+	TokenType TokenTypeEnum      `json:"token_type"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CreateAdminToken(ctx context.Context, arg CreateAdminTokenParams) (CreateAdminTokenRow, error) {
+	row := q.db.QueryRow(ctx, createAdminToken,
+		arg.ID,
+		arg.AdminID,
+		arg.TokenType,
+		arg.TokenHash,
+		arg.DeviceInfo,
+		arg.IpAddress,
+		arg.ExpiresAt,
+	)
+	var i CreateAdminTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.AdminID,
+		&i.TokenType,
+		&i.TokenHash,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
     id, full_name, email, password_hash, timezone, preferred_currency_code, referral_code
@@ -140,6 +187,35 @@ func (q *Queries) CreateUserToken(ctx context.Context, arg CreateUserTokenParams
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPlatformAdminByEmail = `-- name: GetPlatformAdminByEmail :one
+SELECT id, full_name, email, password_hash, role, mfa_enabled, mfa_secret_encrypted, 
+       mfa_verified_at, failed_login_count, locked_until, last_login_at, is_active, created_at
+FROM platform_admins
+WHERE email = $1 AND is_active = true
+LIMIT 1
+`
+
+func (q *Queries) GetPlatformAdminByEmail(ctx context.Context, email string) (PlatformAdmins, error) {
+	row := q.db.QueryRow(ctx, getPlatformAdminByEmail, email)
+	var i PlatformAdmins
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.MfaEnabled,
+		&i.MfaSecretEncrypted,
+		&i.MfaVerifiedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
+		&i.LastLoginAt,
+		&i.IsActive,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -304,5 +380,140 @@ WHERE id = $1
 
 func (q *Queries) RevokeUserToken(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeUserToken, id)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type UpdateUserPasswordParams struct {
+	ID           uuid.UUID   `json:"id"`
+	PasswordHash pgtype.Text `json:"password_hash"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	return err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :one
+UPDATE users
+SET full_name = COALESCE($2, full_name),
+    phone_number = COALESCE($3, phone_number),
+    gender = COALESCE($4, gender),
+    date_of_birth = COALESCE($5, date_of_birth),
+    timezone = COALESCE($6, timezone),
+    preferred_currency_code = COALESCE($7, preferred_currency_code),
+    avatar_url = COALESCE($8, avatar_url)
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, full_name, email, is_email_verified, password_hash, google_id, 
+          phone_number, date_of_birth, gender, timezone, preferred_currency_code, 
+          avatar_url, referral_code, points_balance, locked_points_balance, created_at
+`
+
+type UpdateUserProfileParams struct {
+	ID                    uuid.UUID      `json:"id"`
+	FullName              string         `json:"full_name"`
+	PhoneNumber           pgtype.Text    `json:"phone_number"`
+	Gender                NullUserGender `json:"gender"`
+	DateOfBirth           pgtype.Date    `json:"date_of_birth"`
+	Timezone              string         `json:"timezone"`
+	PreferredCurrencyCode string         `json:"preferred_currency_code"`
+	AvatarUrl             pgtype.Text    `json:"avatar_url"`
+}
+
+type UpdateUserProfileRow struct {
+	ID                    uuid.UUID          `json:"id"`
+	FullName              string             `json:"full_name"`
+	Email                 string             `json:"email"`
+	IsEmailVerified       bool               `json:"is_email_verified"`
+	PasswordHash          pgtype.Text        `json:"password_hash"`
+	GoogleID              pgtype.Text        `json:"google_id"`
+	PhoneNumber           pgtype.Text        `json:"phone_number"`
+	DateOfBirth           pgtype.Date        `json:"date_of_birth"`
+	Gender                NullUserGender     `json:"gender"`
+	Timezone              string             `json:"timezone"`
+	PreferredCurrencyCode string             `json:"preferred_currency_code"`
+	AvatarUrl             pgtype.Text        `json:"avatar_url"`
+	ReferralCode          pgtype.Text        `json:"referral_code"`
+	PointsBalance         int64              `json:"points_balance"`
+	LockedPointsBalance   int64              `json:"locked_points_balance"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error) {
+	row := q.db.QueryRow(ctx, updateUserProfile,
+		arg.ID,
+		arg.FullName,
+		arg.PhoneNumber,
+		arg.Gender,
+		arg.DateOfBirth,
+		arg.Timezone,
+		arg.PreferredCurrencyCode,
+		arg.AvatarUrl,
+	)
+	var i UpdateUserProfileRow
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Email,
+		&i.IsEmailVerified,
+		&i.PasswordHash,
+		&i.GoogleID,
+		&i.PhoneNumber,
+		&i.DateOfBirth,
+		&i.Gender,
+		&i.Timezone,
+		&i.PreferredCurrencyCode,
+		&i.AvatarUrl,
+		&i.ReferralCode,
+		&i.PointsBalance,
+		&i.LockedPointsBalance,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertFCMDeviceToken = `-- name: UpsertFCMDeviceToken :exec
+INSERT INTO user_tokens (
+    id, user_id, token_type, token_hash, fcm_device_token, device_info, expires_at
+) VALUES (
+    $1, $2, 'fcm_device', $3, $4, $5, NOW() + INTERVAL '1 year'
+) ON CONFLICT (token_hash) DO UPDATE
+SET fcm_device_token = EXCLUDED.fcm_device_token,
+    device_info = EXCLUDED.device_info,
+    expires_at = EXCLUDED.expires_at
+`
+
+type UpsertFCMDeviceTokenParams struct {
+	ID             uuid.UUID   `json:"id"`
+	UserID         uuid.UUID   `json:"user_id"`
+	TokenHash      string      `json:"token_hash"`
+	FcmDeviceToken pgtype.Text `json:"fcm_device_token"`
+	DeviceInfo     pgtype.Text `json:"device_info"`
+}
+
+func (q *Queries) UpsertFCMDeviceToken(ctx context.Context, arg UpsertFCMDeviceTokenParams) error {
+	_, err := q.db.Exec(ctx, upsertFCMDeviceToken,
+		arg.ID,
+		arg.UserID,
+		arg.TokenHash,
+		arg.FcmDeviceToken,
+		arg.DeviceInfo,
+	)
+	return err
+}
+
+const verifyUserEmail = `-- name: VerifyUserEmail :exec
+UPDATE users
+SET is_email_verified = true
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) VerifyUserEmail(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, verifyUserEmail, id)
 	return err
 }

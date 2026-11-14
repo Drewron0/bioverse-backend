@@ -15,6 +15,7 @@ type Querier interface {
 	ClaimSponsoredQuota(ctx context.Context, id uuid.UUID) (SponsoredAdoptionQuotas, error)
 	ClearUserPrimaryPets(ctx context.Context, userID uuid.UUID) error
 	CountActiveCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) (int64, error)
+	CreateAdminToken(ctx context.Context, arg CreateAdminTokenParams) (CreateAdminTokenRow, error)
 	CreateB2BContract(ctx context.Context, arg CreateB2BContractParams) (B2bContracts, error)
 	CreateCompany(ctx context.Context, arg CreateCompanyParams) (Companies, error)
 	CreateCompanyMember(ctx context.Context, arg CreateCompanyMemberParams) (CompanyMembers, error)
@@ -38,8 +39,10 @@ type Querier interface {
 	CreateVirtualPet(ctx context.Context, arg CreateVirtualPetParams) (VirtualPets, error)
 	CreditUserPoints(ctx context.Context, arg CreditUserPointsParams) (CreditUserPointsRow, error)
 	DecrementUserInventoryItem(ctx context.Context, arg DecrementUserInventoryItemParams) (UserDigitalInventories, error)
+	EquipVirtualPetProduct(ctx context.Context, arg EquipVirtualPetProductParams) (VirtualPets, error)
 	GetCompanyByID(ctx context.Context, id uuid.UUID) (Companies, error)
 	GetConservationProjectByID(ctx context.Context, id uuid.UUID) (GetConservationProjectByIDRow, error)
+	GetCoralFragmentByID(ctx context.Context, id uuid.UUID) (GetCoralFragmentByIDRow, error)
 	GetCurrencyByCode(ctx context.Context, code string) (Currencies, error)
 	GetDigitalProductByID(ctx context.Context, id uuid.UUID) (GetDigitalProductByIDRow, error)
 	GetDigitalProductBySKU(ctx context.Context, arg GetDigitalProductBySKUParams) (GetDigitalProductBySKURow, error)
@@ -54,6 +57,8 @@ type Querier interface {
 	GetMissionSubmissionByID(ctx context.Context, arg GetMissionSubmissionByIDParams) (UserMissionSubmissions, error)
 	GetOpenSpiderFrameForZone(ctx context.Context, zoneID uuid.UUID) (GetOpenSpiderFrameForZoneRow, error)
 	GetOperatorPayoutByID(ctx context.Context, id uuid.UUID) (OperatorPayouts, error)
+	GetPlatformAdminByEmail(ctx context.Context, email string) (PlatformAdmins, error)
+	GetPlatformImpactSummary(ctx context.Context) (GetPlatformImpactSummaryRow, error)
 	GetSponsoredAdoptionQuota(ctx context.Context, id uuid.UUID) (SponsoredAdoptionQuotas, error)
 	GetSubscriptionPlanByID(ctx context.Context, arg GetSubscriptionPlanByIDParams) (GetSubscriptionPlanByIDRow, error)
 	GetTodaySubmissionForMission(ctx context.Context, arg GetTodaySubmissionForMissionParams) (UserMissionSubmissions, error)
@@ -76,6 +81,7 @@ type Querier interface {
 	ListConservationProjects(ctx context.Context) ([]ListConservationProjectsRow, error)
 	ListContractsByCompanyID(ctx context.Context, companyID uuid.UUID) ([]ListContractsByCompanyIDRow, error)
 	ListCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) ([]ListCoralFragmentsByUserIDRow, error)
+	ListCoralMilestonesByFragmentID(ctx context.Context, coralFragmentID pgtype.UUID) ([]ListCoralMilestonesByFragmentIDRow, error)
 	ListDonationsByUserID(ctx context.Context, userID uuid.UUID) ([]ListDonationsByUserIDRow, error)
 	ListESGAuditReportsByCompany(ctx context.Context, companyID uuid.UUID) ([]EsgAuditReports, error)
 	ListESGMetricsByCompany(ctx context.Context, arg ListESGMetricsByCompanyParams) ([]EsgBiodiversityMetrics, error)
@@ -83,6 +89,7 @@ type Querier interface {
 	ListFieldOperatorsByZone(ctx context.Context, zoneID uuid.UUID) ([]FieldOperators, error)
 	ListMediaEvidencesByFragmentID(ctx context.Context, coralFragmentID pgtype.UUID) ([]MediaEvidences, error)
 	ListMediaEvidencesByProjectID(ctx context.Context, arg ListMediaEvidencesByProjectIDParams) ([]MediaEvidences, error)
+	ListNewsArticles(ctx context.Context, limit int32) ([]NewsArticles, error)
 	ListOperatorPayouts(ctx context.Context, operatorID uuid.UUID) ([]ListOperatorPayoutsRow, error)
 	ListOperatorWorkLogs(ctx context.Context, arg ListOperatorWorkLogsParams) ([]ListOperatorWorkLogsRow, error)
 	ListSubmissionsByUserID(ctx context.Context, arg ListSubmissionsByUserIDParams) ([]ListSubmissionsByUserIDRow, error)
@@ -100,9 +107,13 @@ type Querier interface {
 	UpdateDonationPaymentStatus(ctx context.Context, arg UpdateDonationPaymentStatusParams) (Donations, error)
 	UpdateOperatorPayoutStatus(ctx context.Context, arg UpdateOperatorPayoutStatusParams) (OperatorPayouts, error)
 	UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscriptionStatusParams) (DonationSubscriptions, error)
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error)
 	UpdateUserStreak(ctx context.Context, arg UpdateUserStreakParams) (UserStreaks, error)
 	UpdateVirtualPetHealthAndXP(ctx context.Context, arg UpdateVirtualPetHealthAndXPParams) (VirtualPets, error)
+	UpsertFCMDeviceToken(ctx context.Context, arg UpsertFCMDeviceTokenParams) error
 	UpsertUserInventoryItem(ctx context.Context, arg UpsertUserInventoryItemParams) (UserDigitalInventories, error)
+	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
 }
 
 var _ Querier = (*Queries)(nil)

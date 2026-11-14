@@ -61,9 +61,44 @@ INSERT INTO coral_fragments (
 SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
        cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
        cf.latest_photo_url, cf.planted_at, cf.last_monitored_at, cf.created_at,
-       cp.title AS project_title, cz.name AS zone_name
+       cp.title AS project_title, cz.name AS zone_name, sf.frame_code AS spider_frame_tag
 FROM coral_fragments cf
 JOIN conservation_projects cp ON cf.project_id = cp.id
 JOIN conservation_zones cz ON cp.zone_id = cz.id
+LEFT JOIN spider_frames sf ON cf.spider_frame_id = sf.id
 WHERE cf.adopted_by_user_id = $1
 ORDER BY cf.created_at DESC;
+
+-- name: GetCoralFragmentByID :one
+SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
+       cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
+       cf.latest_photo_url, cf.planted_at, cf.last_monitored_at, cf.created_at,
+       cp.title AS project_title, cz.name AS zone_name, sf.frame_code AS spider_frame_tag
+FROM coral_fragments cf
+JOIN conservation_projects cp ON cf.project_id = cp.id
+JOIN conservation_zones cz ON cp.zone_id = cz.id
+LEFT JOIN spider_frames sf ON cf.spider_frame_id = sf.id
+WHERE cf.id = $1
+LIMIT 1;
+
+-- name: ListCoralMilestonesByFragmentID :many
+SELECT me.id, me.milestone_month, me.milestone_title, me.media_url, 
+       me.is_verified_healthy, me.subtitle_metrics, me.captured_at, me.created_at,
+       cf.health_status
+FROM media_evidences me
+JOIN coral_fragments cf ON me.coral_fragment_id = cf.id
+WHERE me.coral_fragment_id = $1
+ORDER BY me.milestone_month ASC;
+
+-- name: ListNewsArticles :many
+SELECT id, title, category, summary, content, thumbnail_url, is_featured, published_at, created_at
+FROM news_articles
+ORDER BY published_at DESC
+LIMIT $1;
+
+-- name: GetPlatformImpactSummary :one
+SELECT 
+    COALESCE((SELECT COUNT(*) FROM coral_fragments WHERE lifecycle_status != 'deceased'), 0)::bigint AS total_corals_adopted,
+    COALESCE((SELECT SUM(planted_units_count) FROM conservation_projects WHERE category = 'tree'), 0)::bigint AS total_trees_planted,
+    COALESCE((SELECT COUNT(DISTINCT adopted_by_user_id) FROM coral_fragments WHERE adopted_by_user_id IS NOT NULL), 0)::bigint AS active_guardians_count,
+    COALESCE((SELECT SUM(planted_units_count) * 2.5 FROM conservation_projects), 0)::numeric AS total_biomass_restored_kg;

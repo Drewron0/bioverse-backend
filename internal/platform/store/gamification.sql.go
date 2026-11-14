@@ -269,6 +269,42 @@ func (q *Queries) CreditUserPoints(ctx context.Context, arg CreditUserPointsPara
 	return i, err
 }
 
+const equipVirtualPetProduct = `-- name: EquipVirtualPetProduct :one
+UPDATE virtual_pets
+SET equipped_product_id = $3
+WHERE id = $1 AND user_id = $2
+RETURNING id, user_id, fragment_id, equipped_product_id, pet_name, pet_species, coral_type, growth_stage, health_percent, level, experience_points, is_primary, last_interacted_at, adopted_at, created_at
+`
+
+type EquipVirtualPetProductParams struct {
+	ID                uuid.UUID   `json:"id"`
+	UserID            uuid.UUID   `json:"user_id"`
+	EquippedProductID pgtype.UUID `json:"equipped_product_id"`
+}
+
+func (q *Queries) EquipVirtualPetProduct(ctx context.Context, arg EquipVirtualPetProductParams) (VirtualPets, error) {
+	row := q.db.QueryRow(ctx, equipVirtualPetProduct, arg.ID, arg.UserID, arg.EquippedProductID)
+	var i VirtualPets
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FragmentID,
+		&i.EquippedProductID,
+		&i.PetName,
+		&i.PetSpecies,
+		&i.CoralType,
+		&i.GrowthStage,
+		&i.HealthPercent,
+		&i.Level,
+		&i.ExperiencePoints,
+		&i.IsPrimary,
+		&i.LastInteractedAt,
+		&i.AdoptedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLeaderboard = `-- name: GetLeaderboard :many
 SELECT id, full_name, avatar_url, points_balance,
        ROW_NUMBER() OVER (ORDER BY points_balance DESC, created_at ASC) AS rank_position

@@ -65,3 +65,51 @@ WHERE id = $1;
 UPDATE user_tokens
 SET revoked_at = NOW()
 WHERE user_id = $1 AND token_type = $2 AND revoked_at IS NULL;
+
+-- name: UpdateUserProfile :one
+UPDATE users
+SET full_name = COALESCE($2, full_name),
+    phone_number = COALESCE($3, phone_number),
+    gender = COALESCE($4, gender),
+    date_of_birth = COALESCE($5, date_of_birth),
+    timezone = COALESCE($6, timezone),
+    preferred_currency_code = COALESCE($7, preferred_currency_code),
+    avatar_url = COALESCE($8, avatar_url)
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, full_name, email, is_email_verified, password_hash, google_id, 
+          phone_number, date_of_birth, gender, timezone, preferred_currency_code, 
+          avatar_url, referral_code, points_balance, locked_points_balance, created_at;
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2
+WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: VerifyUserEmail :exec
+UPDATE users
+SET is_email_verified = true
+WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: UpsertFCMDeviceToken :exec
+INSERT INTO user_tokens (
+    id, user_id, token_type, token_hash, fcm_device_token, device_info, expires_at
+) VALUES (
+    $1, $2, 'fcm_device', $3, $4, $5, NOW() + INTERVAL '1 year'
+) ON CONFLICT (token_hash) DO UPDATE
+SET fcm_device_token = EXCLUDED.fcm_device_token,
+    device_info = EXCLUDED.device_info,
+    expires_at = EXCLUDED.expires_at;
+
+-- name: GetPlatformAdminByEmail :one
+SELECT id, full_name, email, password_hash, role, mfa_enabled, mfa_secret_encrypted, 
+       mfa_verified_at, failed_login_count, locked_until, last_login_at, is_active, created_at
+FROM platform_admins
+WHERE email = $1 AND is_active = true
+LIMIT 1;
+
+-- name: CreateAdminToken :one
+INSERT INTO admin_tokens (
+    id, admin_id, token_type, token_hash, device_info, ip_address, expires_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+) RETURNING id, admin_id, token_type, token_hash, expires_at;

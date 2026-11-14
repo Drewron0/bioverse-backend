@@ -157,6 +157,62 @@ func (q *Queries) GetConservationProjectByID(ctx context.Context, id uuid.UUID) 
 	return i, err
 }
 
+const getCoralFragmentByID = `-- name: GetCoralFragmentByID :one
+SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
+       cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
+       cf.latest_photo_url, cf.planted_at, cf.last_monitored_at, cf.created_at,
+       cp.title AS project_title, cz.name AS zone_name, sf.frame_code AS spider_frame_tag
+FROM coral_fragments cf
+JOIN conservation_projects cp ON cf.project_id = cp.id
+JOIN conservation_zones cz ON cp.zone_id = cz.id
+LEFT JOIN spider_frames sf ON cf.spider_frame_id = sf.id
+WHERE cf.id = $1
+LIMIT 1
+`
+
+type GetCoralFragmentByIDRow struct {
+	ID              uuid.UUID                     `json:"id"`
+	FragmentCode    string                        `json:"fragment_code"`
+	Nickname        pgtype.Text                   `json:"nickname"`
+	ProjectID       uuid.UUID                     `json:"project_id"`
+	DonationID      pgtype.UUID                   `json:"donation_id"`
+	SpiderFrameID   pgtype.UUID                   `json:"spider_frame_id"`
+	SpeciesName     string                        `json:"species_name"`
+	LifecycleStatus FragmentLifecycleStatus       `json:"lifecycle_status"`
+	HealthStatus    NullEnvironmentalHealthStatus `json:"health_status"`
+	LatestPhotoUrl  pgtype.Text                   `json:"latest_photo_url"`
+	PlantedAt       pgtype.Timestamptz            `json:"planted_at"`
+	LastMonitoredAt pgtype.Timestamptz            `json:"last_monitored_at"`
+	CreatedAt       pgtype.Timestamptz            `json:"created_at"`
+	ProjectTitle    string                        `json:"project_title"`
+	ZoneName        string                        `json:"zone_name"`
+	SpiderFrameTag  pgtype.Text                   `json:"spider_frame_tag"`
+}
+
+func (q *Queries) GetCoralFragmentByID(ctx context.Context, id uuid.UUID) (GetCoralFragmentByIDRow, error) {
+	row := q.db.QueryRow(ctx, getCoralFragmentByID, id)
+	var i GetCoralFragmentByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.FragmentCode,
+		&i.Nickname,
+		&i.ProjectID,
+		&i.DonationID,
+		&i.SpiderFrameID,
+		&i.SpeciesName,
+		&i.LifecycleStatus,
+		&i.HealthStatus,
+		&i.LatestPhotoUrl,
+		&i.PlantedAt,
+		&i.LastMonitoredAt,
+		&i.CreatedAt,
+		&i.ProjectTitle,
+		&i.ZoneName,
+		&i.SpiderFrameTag,
+	)
+	return i, err
+}
+
 const getOpenSpiderFrameForZone = `-- name: GetOpenSpiderFrameForZone :one
 SELECT id, frame_code, zone_id, depth_meters, latitude, longitude,
        max_capacity_fragments, fragments_planted, physical_health_status
@@ -193,6 +249,33 @@ func (q *Queries) GetOpenSpiderFrameForZone(ctx context.Context, zoneID uuid.UUI
 		&i.MaxCapacityFragments,
 		&i.FragmentsPlanted,
 		&i.PhysicalHealthStatus,
+	)
+	return i, err
+}
+
+const getPlatformImpactSummary = `-- name: GetPlatformImpactSummary :one
+SELECT 
+    COALESCE((SELECT COUNT(*) FROM coral_fragments WHERE lifecycle_status != 'deceased'), 0)::bigint AS total_corals_adopted,
+    COALESCE((SELECT SUM(planted_units_count) FROM conservation_projects WHERE category = 'tree'), 0)::bigint AS total_trees_planted,
+    COALESCE((SELECT COUNT(DISTINCT adopted_by_user_id) FROM coral_fragments WHERE adopted_by_user_id IS NOT NULL), 0)::bigint AS active_guardians_count,
+    COALESCE((SELECT SUM(planted_units_count) * 2.5 FROM conservation_projects), 0)::numeric AS total_biomass_restored_kg
+`
+
+type GetPlatformImpactSummaryRow struct {
+	TotalCoralsAdopted     int64          `json:"total_corals_adopted"`
+	TotalTreesPlanted      int64          `json:"total_trees_planted"`
+	ActiveGuardiansCount   int64          `json:"active_guardians_count"`
+	TotalBiomassRestoredKg pgtype.Numeric `json:"total_biomass_restored_kg"`
+}
+
+func (q *Queries) GetPlatformImpactSummary(ctx context.Context) (GetPlatformImpactSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getPlatformImpactSummary)
+	var i GetPlatformImpactSummaryRow
+	err := row.Scan(
+		&i.TotalCoralsAdopted,
+		&i.TotalTreesPlanted,
+		&i.ActiveGuardiansCount,
+		&i.TotalBiomassRestoredKg,
 	)
 	return i, err
 }
@@ -348,10 +431,11 @@ const listCoralFragmentsByUserID = `-- name: ListCoralFragmentsByUserID :many
 SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
        cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
        cf.latest_photo_url, cf.planted_at, cf.last_monitored_at, cf.created_at,
-       cp.title AS project_title, cz.name AS zone_name
+       cp.title AS project_title, cz.name AS zone_name, sf.frame_code AS spider_frame_tag
 FROM coral_fragments cf
 JOIN conservation_projects cp ON cf.project_id = cp.id
 JOIN conservation_zones cz ON cp.zone_id = cz.id
+LEFT JOIN spider_frames sf ON cf.spider_frame_id = sf.id
 WHERE cf.adopted_by_user_id = $1
 ORDER BY cf.created_at DESC
 `
@@ -372,6 +456,7 @@ type ListCoralFragmentsByUserIDRow struct {
 	CreatedAt       pgtype.Timestamptz            `json:"created_at"`
 	ProjectTitle    string                        `json:"project_title"`
 	ZoneName        string                        `json:"zone_name"`
+	SpiderFrameTag  pgtype.Text                   `json:"spider_frame_tag"`
 }
 
 func (q *Queries) ListCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) ([]ListCoralFragmentsByUserIDRow, error) {
@@ -399,6 +484,96 @@ func (q *Queries) ListCoralFragmentsByUserID(ctx context.Context, adoptedByUserI
 			&i.CreatedAt,
 			&i.ProjectTitle,
 			&i.ZoneName,
+			&i.SpiderFrameTag,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCoralMilestonesByFragmentID = `-- name: ListCoralMilestonesByFragmentID :many
+SELECT me.id, me.milestone_month, me.milestone_title, me.media_url, 
+       me.is_verified_healthy, me.subtitle_metrics, me.captured_at, me.created_at,
+       cf.health_status
+FROM media_evidences me
+JOIN coral_fragments cf ON me.coral_fragment_id = cf.id
+WHERE me.coral_fragment_id = $1
+ORDER BY me.milestone_month ASC
+`
+
+type ListCoralMilestonesByFragmentIDRow struct {
+	ID                uuid.UUID                     `json:"id"`
+	MilestoneMonth    pgtype.Int4                   `json:"milestone_month"`
+	MilestoneTitle    pgtype.Text                   `json:"milestone_title"`
+	MediaUrl          string                        `json:"media_url"`
+	IsVerifiedHealthy bool                          `json:"is_verified_healthy"`
+	SubtitleMetrics   pgtype.Text                   `json:"subtitle_metrics"`
+	CapturedAt        pgtype.Timestamptz            `json:"captured_at"`
+	CreatedAt         pgtype.Timestamptz            `json:"created_at"`
+	HealthStatus      NullEnvironmentalHealthStatus `json:"health_status"`
+}
+
+func (q *Queries) ListCoralMilestonesByFragmentID(ctx context.Context, coralFragmentID pgtype.UUID) ([]ListCoralMilestonesByFragmentIDRow, error) {
+	rows, err := q.db.Query(ctx, listCoralMilestonesByFragmentID, coralFragmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCoralMilestonesByFragmentIDRow
+	for rows.Next() {
+		var i ListCoralMilestonesByFragmentIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MilestoneMonth,
+			&i.MilestoneTitle,
+			&i.MediaUrl,
+			&i.IsVerifiedHealthy,
+			&i.SubtitleMetrics,
+			&i.CapturedAt,
+			&i.CreatedAt,
+			&i.HealthStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNewsArticles = `-- name: ListNewsArticles :many
+SELECT id, title, category, summary, content, thumbnail_url, is_featured, published_at, created_at
+FROM news_articles
+ORDER BY published_at DESC
+LIMIT $1
+`
+
+func (q *Queries) ListNewsArticles(ctx context.Context, limit int32) ([]NewsArticles, error) {
+	rows, err := q.db.Query(ctx, listNewsArticles, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NewsArticles
+	for rows.Next() {
+		var i NewsArticles
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Category,
+			&i.Summary,
+			&i.Content,
+			&i.ThumbnailUrl,
+			&i.IsFeatured,
+			&i.PublishedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

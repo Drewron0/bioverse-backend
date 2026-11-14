@@ -154,3 +154,9 @@ SET points_balance = points_balance - $2,
     locked_points_balance = locked_points_balance - $2
 WHERE id = $1 AND points_balance >= $2 AND locked_points_balance >= $2
 RETURNING id, points_balance, locked_points_balance;
+
+-- name: EquipVirtualPetProduct :one
+UPDATE virtual_pets
+SET equipped_product_id = $3
+WHERE id = $1 AND user_id = $2
+RETURNING *;
