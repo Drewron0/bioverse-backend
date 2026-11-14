@@ -9,6 +9,7 @@ import (
 	"github.com/Drewron01/bioverse-backend/internal/conservation"
 	"github.com/Drewron01/bioverse-backend/internal/platform/database"
 	"github.com/Drewron01/bioverse-backend/internal/platform/decimalutil"
+	"github.com/Drewron01/bioverse-backend/internal/platform/payment"
 	"github.com/Drewron01/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -63,14 +64,19 @@ type Service struct {
 	pool                *pgxpool.Pool
 	store               store.Querier
 	conservationService *conservation.Service
+	gateway             payment.Gateway
 }
 
 // NewService constructs a new donation service.
-func NewService(pool *pgxpool.Pool, q store.Querier, consSvc *conservation.Service) *Service {
+func NewService(pool *pgxpool.Pool, q store.Querier, consSvc *conservation.Service, gw payment.Gateway) *Service {
+	if gw == nil {
+		gw = payment.NewXenditClient("", nil)
+	}
 	return &Service{
 		pool:                pool,
 		store:               q,
 		conservationService: consSvc,
+		gateway:             gw,
 	}
 }
 
@@ -152,14 +158,27 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	var qrisPayload string
 	var vaNumber string
 	var bankCode string
+	var externalRef string
 
-	switch in.PaymentMethod {
-	case store.PaymentMethodTypeQris:
+	if moneyAmountPaid.IsPositive() {
+		user, _ := s.store.GetUserByID(ctx, in.UserID)
+		inv, err := s.gateway.CreateInvoice(ctx, donationID.String(), settlementAmount, fmt.Sprintf("BioVerse Coral Restoration: %s", project.Title), user.Email)
+		if err == nil && inv != nil {
+			externalRef = inv.ID
+			if inv.QRISPayload != "" {
+				qrisPayload = inv.QRISPayload
+			}
+			if inv.VANumber != "" {
+				vaNumber = inv.VANumber
+				bankCode = "MANDIRI"
+			}
+		}
+	}
+
+	if qrisPayload == "" && in.PaymentMethod == store.PaymentMethodTypeQris {
 		qrisPayload = fmt.Sprintf("00020101021226580016ID.CO.XENDIT.WWW01189360091800000000005204581253033605802ID5914BIOVERSE REEF6007DENPASAR62070703A016304%s", donationID.String()[:4])
-	case store.PaymentMethodTypeVirtualAccount:
-		bankCode = "MANDIRI"
-		vaNumber = fmt.Sprintf("88908%d", time.Now().Unix()%100000000)
-	default:
+	}
+	if vaNumber == "" && in.PaymentMethod != store.PaymentMethodTypeQris {
 		bankCode = "MANDIRI"
 		vaNumber = fmt.Sprintf("88908%d", time.Now().Unix()%100000000)
 	}
@@ -225,6 +244,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			PointsMonetaryEquivalent: decimalutil.ToNumeric(pointsDiscount),
 			IsPointsLocked:           in.PointsToUse > 0,
 			PaymentStatus:            store.PaymentStatusPending,
+			ExternalGatewayRef:       pgtype.Text{String: externalRef, Valid: externalRef != ""},
 			ExpiredAt:                pgtype.Timestamptz{Time: expiredAt, Valid: true},
 		})
 		if err != nil {

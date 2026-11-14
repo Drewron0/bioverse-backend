@@ -19,7 +19,10 @@ import (
 	"github.com/Drewron01/bioverse-backend/internal/identity"
 	"github.com/Drewron01/bioverse-backend/internal/platform/config"
 	"github.com/Drewron01/bioverse-backend/internal/platform/database"
+	"github.com/Drewron01/bioverse-backend/internal/platform/email"
 	"github.com/Drewron01/bioverse-backend/internal/platform/middleware"
+	"github.com/Drewron01/bioverse-backend/internal/platform/notification"
+	"github.com/Drewron01/bioverse-backend/internal/platform/payment"
 	"github.com/Drewron01/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -164,7 +167,11 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		catalogHandler := catalog.NewHandler(catalogService)
 		catalogHandler.RegisterRoutes(r)
 
-		donationService := donation.NewService(db, queries, conservationService)
+		xenditGateway := payment.NewXenditClient(cfg.Payment.XenditSecretKey, log)
+		_ = email.NewResendClient(cfg.Email.ResendAPIKey, cfg.Email.FromEmail, log)
+		_ = notification.NewFCMDispatcher(cfg.Notification.FCMCredentialsPath, log)
+
+		donationService := donation.NewService(db, queries, conservationService, xenditGateway)
 		donationHandler := donation.NewHandler(donationService)
 		donationHandler.RegisterRoutes(r, authMiddleware)
 
