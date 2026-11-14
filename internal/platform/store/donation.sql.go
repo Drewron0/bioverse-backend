@@ -326,6 +326,113 @@ func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) (
 	return items, nil
 }
 
+const listExpiredPendingDonations = `-- name: ListExpiredPendingDonations :many
+SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at FROM donations
+WHERE payment_status = 'pending' AND expired_at < NOW()
+LIMIT $1
+`
+
+func (q *Queries) ListExpiredPendingDonations(ctx context.Context, limit int32) ([]Donations, error) {
+	rows, err := q.db.Query(ctx, listExpiredPendingDonations, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Donations
+	for rows.Next() {
+		var i Donations
+		if err := rows.Scan(
+			&i.ID,
+			&i.IdempotencyKey,
+			&i.UserID,
+			&i.ProjectID,
+			&i.SubscriptionID,
+			&i.SponsoredQuotaID,
+			&i.CycleNumber,
+			&i.DonationType,
+			&i.IsAnonymous,
+			&i.UnitQuantity,
+			&i.CurrencyCode,
+			&i.GrossProjectValue,
+			&i.MoneyAmountPaid,
+			&i.SettlementCurrencyCode,
+			&i.SettlementAmount,
+			&i.FxRateSnapshot,
+			&i.GatewayFeeSettlement,
+			&i.MoneyPaymentMethod,
+			&i.PaymentProvider,
+			&i.IsMixedPayment,
+			&i.BankCode,
+			&i.VaNumber,
+			&i.QrisPayload,
+			&i.PointsUsed,
+			&i.PointsRateSnapshot,
+			&i.PointsMonetaryEquivalent,
+			&i.IsPointsLocked,
+			&i.PaymentStatus,
+			&i.ExternalGatewayRef,
+			&i.PaidAt,
+			&i.ExpiredAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markDonationExpired = `-- name: MarkDonationExpired :one
+UPDATE donations
+SET payment_status = 'expired',
+    is_points_locked = false
+WHERE id = $1 AND payment_status = 'pending'
+RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at
+`
+
+func (q *Queries) MarkDonationExpired(ctx context.Context, id uuid.UUID) (Donations, error) {
+	row := q.db.QueryRow(ctx, markDonationExpired, id)
+	var i Donations
+	err := row.Scan(
+		&i.ID,
+		&i.IdempotencyKey,
+		&i.UserID,
+		&i.ProjectID,
+		&i.SubscriptionID,
+		&i.SponsoredQuotaID,
+		&i.CycleNumber,
+		&i.DonationType,
+		&i.IsAnonymous,
+		&i.UnitQuantity,
+		&i.CurrencyCode,
+		&i.GrossProjectValue,
+		&i.MoneyAmountPaid,
+		&i.SettlementCurrencyCode,
+		&i.SettlementAmount,
+		&i.FxRateSnapshot,
+		&i.GatewayFeeSettlement,
+		&i.MoneyPaymentMethod,
+		&i.PaymentProvider,
+		&i.IsMixedPayment,
+		&i.BankCode,
+		&i.VaNumber,
+		&i.QrisPayload,
+		&i.PointsUsed,
+		&i.PointsRateSnapshot,
+		&i.PointsMonetaryEquivalent,
+		&i.IsPointsLocked,
+		&i.PaymentStatus,
+		&i.ExternalGatewayRef,
+		&i.PaidAt,
+		&i.ExpiredAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateDonationPaymentStatus = `-- name: UpdateDonationPaymentStatus :one
 UPDATE donations
 SET payment_status = $2,

@@ -12,6 +12,202 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createDonationSubscription = `-- name: CreateDonationSubscription :one
+INSERT INTO donation_subscriptions (
+    id, user_id, plan_id, project_id, frequency, duration_months, unit_quantity,
+    currency_code, amount_per_cycle, payment_method, payment_provider, status, next_billing_date
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12, $13
+) RETURNING id, user_id, plan_id, project_id, frequency, duration_months, completed_cycles, unit_quantity, currency_code, amount_per_cycle, payment_method, payment_provider, gateway_customer_id_encrypted, payment_token_encrypted, failed_charge_count, last_failed_at, status, pause_reason, paused_at, last_reminder_sent_at, resume_payment_url, next_billing_date, created_at
+`
+
+type CreateDonationSubscriptionParams struct {
+	ID              uuid.UUID             `json:"id"`
+	UserID          uuid.UUID             `json:"user_id"`
+	PlanID          pgtype.UUID           `json:"plan_id"`
+	ProjectID       pgtype.UUID           `json:"project_id"`
+	Frequency       SubscriptionFrequency `json:"frequency"`
+	DurationMonths  pgtype.Int4           `json:"duration_months"`
+	UnitQuantity    int32                 `json:"unit_quantity"`
+	CurrencyCode    string                `json:"currency_code"`
+	AmountPerCycle  pgtype.Numeric        `json:"amount_per_cycle"`
+	PaymentMethod   PaymentMethodType     `json:"payment_method"`
+	PaymentProvider string                `json:"payment_provider"`
+	Status          SubscriptionStatus    `json:"status"`
+	NextBillingDate pgtype.Date           `json:"next_billing_date"`
+}
+
+func (q *Queries) CreateDonationSubscription(ctx context.Context, arg CreateDonationSubscriptionParams) (DonationSubscriptions, error) {
+	row := q.db.QueryRow(ctx, createDonationSubscription,
+		arg.ID,
+		arg.UserID,
+		arg.PlanID,
+		arg.ProjectID,
+		arg.Frequency,
+		arg.DurationMonths,
+		arg.UnitQuantity,
+		arg.CurrencyCode,
+		arg.AmountPerCycle,
+		arg.PaymentMethod,
+		arg.PaymentProvider,
+		arg.Status,
+		arg.NextBillingDate,
+	)
+	var i DonationSubscriptions
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.PlanID,
+		&i.ProjectID,
+		&i.Frequency,
+		&i.DurationMonths,
+		&i.CompletedCycles,
+		&i.UnitQuantity,
+		&i.CurrencyCode,
+		&i.AmountPerCycle,
+		&i.PaymentMethod,
+		&i.PaymentProvider,
+		&i.GatewayCustomerIDEncrypted,
+		&i.PaymentTokenEncrypted,
+		&i.FailedChargeCount,
+		&i.LastFailedAt,
+		&i.Status,
+		&i.PauseReason,
+		&i.PausedAt,
+		&i.LastReminderSentAt,
+		&i.ResumePaymentUrl,
+		&i.NextBillingDate,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createIAPTransaction = `-- name: CreateIAPTransaction :one
+INSERT INTO iap_transactions (
+    id, user_id, product_id, store_provider, store_transaction_id, environment,
+    receipt_payload, currency_code, gross_amount, store_fee_amount, net_revenue_amount, status
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11, $12
+) RETURNING id, user_id, product_id, store_provider, store_transaction_id, original_transaction_id, environment, receipt_payload, currency_code, gross_amount, store_fee_amount, net_revenue_amount, status, verified_at, revoked_at, created_at
+`
+
+type CreateIAPTransactionParams struct {
+	ID                 uuid.UUID      `json:"id"`
+	UserID             uuid.UUID      `json:"user_id"`
+	ProductID          uuid.UUID      `json:"product_id"`
+	StoreProvider      IapStoreType   `json:"store_provider"`
+	StoreTransactionID string         `json:"store_transaction_id"`
+	Environment        string         `json:"environment"`
+	ReceiptPayload     string         `json:"receipt_payload"`
+	CurrencyCode       string         `json:"currency_code"`
+	GrossAmount        pgtype.Numeric `json:"gross_amount"`
+	StoreFeeAmount     pgtype.Numeric `json:"store_fee_amount"`
+	NetRevenueAmount   pgtype.Numeric `json:"net_revenue_amount"`
+	Status             PaymentStatus  `json:"status"`
+}
+
+func (q *Queries) CreateIAPTransaction(ctx context.Context, arg CreateIAPTransactionParams) (IapTransactions, error) {
+	row := q.db.QueryRow(ctx, createIAPTransaction,
+		arg.ID,
+		arg.UserID,
+		arg.ProductID,
+		arg.StoreProvider,
+		arg.StoreTransactionID,
+		arg.Environment,
+		arg.ReceiptPayload,
+		arg.CurrencyCode,
+		arg.GrossAmount,
+		arg.StoreFeeAmount,
+		arg.NetRevenueAmount,
+		arg.Status,
+	)
+	var i IapTransactions
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ProductID,
+		&i.StoreProvider,
+		&i.StoreTransactionID,
+		&i.OriginalTransactionID,
+		&i.Environment,
+		&i.ReceiptPayload,
+		&i.CurrencyCode,
+		&i.GrossAmount,
+		&i.StoreFeeAmount,
+		&i.NetRevenueAmount,
+		&i.Status,
+		&i.VerifiedAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const decrementUserInventoryItem = `-- name: DecrementUserInventoryItem :one
+UPDATE user_digital_inventories
+SET quantity = quantity - $3
+WHERE user_id = $1 AND product_id = $2 AND quantity >= $3
+RETURNING id, user_id, product_id, quantity, acquired_at
+`
+
+type DecrementUserInventoryItemParams struct {
+	UserID    uuid.UUID `json:"user_id"`
+	ProductID uuid.UUID `json:"product_id"`
+	Quantity  int32     `json:"quantity"`
+}
+
+func (q *Queries) DecrementUserInventoryItem(ctx context.Context, arg DecrementUserInventoryItemParams) (UserDigitalInventories, error) {
+	row := q.db.QueryRow(ctx, decrementUserInventoryItem, arg.UserID, arg.ProductID, arg.Quantity)
+	var i UserDigitalInventories
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ProductID,
+		&i.Quantity,
+		&i.AcquiredAt,
+	)
+	return i, err
+}
+
+const getDigitalProductByID = `-- name: GetDigitalProductByID :one
+SELECT dp.id, dp.sku_code, dp.name, dp.description, dp.item_type,
+       dp.price_points, dp.is_iap_only, dp.attributes, dp.preview_asset_url
+FROM digital_products dp
+WHERE dp.id = $1 AND dp.is_active = true
+LIMIT 1
+`
+
+type GetDigitalProductByIDRow struct {
+	ID              uuid.UUID       `json:"id"`
+	SkuCode         string          `json:"sku_code"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	ItemType        DigitalItemType `json:"item_type"`
+	PricePoints     int64           `json:"price_points"`
+	IsIapOnly       bool            `json:"is_iap_only"`
+	Attributes      []byte          `json:"attributes"`
+	PreviewAssetUrl string          `json:"preview_asset_url"`
+}
+
+func (q *Queries) GetDigitalProductByID(ctx context.Context, id uuid.UUID) (GetDigitalProductByIDRow, error) {
+	row := q.db.QueryRow(ctx, getDigitalProductByID, id)
+	var i GetDigitalProductByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.SkuCode,
+		&i.Name,
+		&i.Description,
+		&i.ItemType,
+		&i.PricePoints,
+		&i.IsIapOnly,
+		&i.Attributes,
+		&i.PreviewAssetUrl,
+	)
+	return i, err
+}
+
 const getDigitalProductBySKU = `-- name: GetDigitalProductBySKU :one
 SELECT dp.id, dp.sku_code, dp.name, dp.description, dp.item_type,
        dp.price_points, dp.is_iap_only, dp.attributes, dp.preview_asset_url,
@@ -56,6 +252,138 @@ func (q *Queries) GetDigitalProductBySKU(ctx context.Context, arg GetDigitalProd
 		&i.PreviewAssetUrl,
 		&i.CurrencyCode,
 		&i.PriceMoney,
+	)
+	return i, err
+}
+
+const getIAPTransactionByStoreTxID = `-- name: GetIAPTransactionByStoreTxID :one
+SELECT id, user_id, product_id, store_provider, store_transaction_id, original_transaction_id, environment, receipt_payload, currency_code, gross_amount, store_fee_amount, net_revenue_amount, status, verified_at, revoked_at, created_at FROM iap_transactions
+WHERE store_provider = $1 AND store_transaction_id = $2
+LIMIT 1
+`
+
+type GetIAPTransactionByStoreTxIDParams struct {
+	StoreProvider      IapStoreType `json:"store_provider"`
+	StoreTransactionID string       `json:"store_transaction_id"`
+}
+
+func (q *Queries) GetIAPTransactionByStoreTxID(ctx context.Context, arg GetIAPTransactionByStoreTxIDParams) (IapTransactions, error) {
+	row := q.db.QueryRow(ctx, getIAPTransactionByStoreTxID, arg.StoreProvider, arg.StoreTransactionID)
+	var i IapTransactions
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ProductID,
+		&i.StoreProvider,
+		&i.StoreTransactionID,
+		&i.OriginalTransactionID,
+		&i.Environment,
+		&i.ReceiptPayload,
+		&i.CurrencyCode,
+		&i.GrossAmount,
+		&i.StoreFeeAmount,
+		&i.NetRevenueAmount,
+		&i.Status,
+		&i.VerifiedAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionPlanByID = `-- name: GetSubscriptionPlanByID :one
+SELECT sp.id, sp.sku_code, sp.group_code, sp.name, sp.description,
+       sp.plan_type, sp.billing_interval, sp.interval_count, sp.duration_months,
+       sp.benefits, spp.currency_code, spp.amount AS price_money
+FROM subscription_plans sp
+LEFT JOIN subscription_plan_prices spp ON sp.id = spp.plan_id AND spp.currency_code = $2
+WHERE sp.id = $1 AND sp.is_active = true
+LIMIT 1
+`
+
+type GetSubscriptionPlanByIDParams struct {
+	ID           uuid.UUID `json:"id"`
+	CurrencyCode string    `json:"currency_code"`
+}
+
+type GetSubscriptionPlanByIDRow struct {
+	ID              uuid.UUID             `json:"id"`
+	SkuCode         string                `json:"sku_code"`
+	GroupCode       string                `json:"group_code"`
+	Name            string                `json:"name"`
+	Description     string                `json:"description"`
+	PlanType        SubscriptionPlanType  `json:"plan_type"`
+	BillingInterval SubscriptionFrequency `json:"billing_interval"`
+	IntervalCount   int32                 `json:"interval_count"`
+	DurationMonths  pgtype.Int4           `json:"duration_months"`
+	Benefits        []byte                `json:"benefits"`
+	CurrencyCode    pgtype.Text           `json:"currency_code"`
+	PriceMoney      pgtype.Numeric        `json:"price_money"`
+}
+
+func (q *Queries) GetSubscriptionPlanByID(ctx context.Context, arg GetSubscriptionPlanByIDParams) (GetSubscriptionPlanByIDRow, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionPlanByID, arg.ID, arg.CurrencyCode)
+	var i GetSubscriptionPlanByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.SkuCode,
+		&i.GroupCode,
+		&i.Name,
+		&i.Description,
+		&i.PlanType,
+		&i.BillingInterval,
+		&i.IntervalCount,
+		&i.DurationMonths,
+		&i.Benefits,
+		&i.CurrencyCode,
+		&i.PriceMoney,
+	)
+	return i, err
+}
+
+const getUserInventoryItem = `-- name: GetUserInventoryItem :one
+SELECT udi.id, udi.user_id, udi.product_id, udi.quantity, udi.acquired_at,
+       dp.sku_code, dp.name, dp.description, dp.item_type, dp.attributes, dp.preview_asset_url
+FROM user_digital_inventories udi
+JOIN digital_products dp ON udi.product_id = dp.id
+WHERE udi.user_id = $1 AND dp.id = $2
+LIMIT 1
+`
+
+type GetUserInventoryItemParams struct {
+	UserID uuid.UUID `json:"user_id"`
+	ID     uuid.UUID `json:"id"`
+}
+
+type GetUserInventoryItemRow struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	ProductID       uuid.UUID          `json:"product_id"`
+	Quantity        int32              `json:"quantity"`
+	AcquiredAt      pgtype.Timestamptz `json:"acquired_at"`
+	SkuCode         string             `json:"sku_code"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	ItemType        DigitalItemType    `json:"item_type"`
+	Attributes      []byte             `json:"attributes"`
+	PreviewAssetUrl string             `json:"preview_asset_url"`
+}
+
+func (q *Queries) GetUserInventoryItem(ctx context.Context, arg GetUserInventoryItemParams) (GetUserInventoryItemRow, error) {
+	row := q.db.QueryRow(ctx, getUserInventoryItem, arg.UserID, arg.ID)
+	var i GetUserInventoryItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ProductID,
+		&i.Quantity,
+		&i.AcquiredAt,
+		&i.SkuCode,
+		&i.Name,
+		&i.Description,
+		&i.ItemType,
+		&i.Attributes,
+		&i.PreviewAssetUrl,
 	)
 	return i, err
 }
@@ -172,4 +500,216 @@ func (q *Queries) ListActiveSubscriptionPlans(ctx context.Context, currencyCode 
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUserInventory = `-- name: ListUserInventory :many
+SELECT udi.id, udi.user_id, udi.product_id, udi.quantity, udi.acquired_at,
+       dp.sku_code, dp.name, dp.description, dp.item_type, dp.attributes, dp.preview_asset_url
+FROM user_digital_inventories udi
+JOIN digital_products dp ON udi.product_id = dp.id
+WHERE udi.user_id = $1 AND udi.quantity > 0
+ORDER BY udi.acquired_at DESC
+`
+
+type ListUserInventoryRow struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	ProductID       uuid.UUID          `json:"product_id"`
+	Quantity        int32              `json:"quantity"`
+	AcquiredAt      pgtype.Timestamptz `json:"acquired_at"`
+	SkuCode         string             `json:"sku_code"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	ItemType        DigitalItemType    `json:"item_type"`
+	Attributes      []byte             `json:"attributes"`
+	PreviewAssetUrl string             `json:"preview_asset_url"`
+}
+
+func (q *Queries) ListUserInventory(ctx context.Context, userID uuid.UUID) ([]ListUserInventoryRow, error) {
+	rows, err := q.db.Query(ctx, listUserInventory, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserInventoryRow
+	for rows.Next() {
+		var i ListUserInventoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ProductID,
+			&i.Quantity,
+			&i.AcquiredAt,
+			&i.SkuCode,
+			&i.Name,
+			&i.Description,
+			&i.ItemType,
+			&i.Attributes,
+			&i.PreviewAssetUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserSubscriptions = `-- name: ListUserSubscriptions :many
+SELECT ds.id, ds.user_id, ds.plan_id, ds.project_id, ds.frequency, ds.duration_months,
+       ds.completed_cycles, ds.unit_quantity, ds.currency_code, ds.amount_per_cycle,
+       ds.payment_method, ds.payment_provider, ds.failed_charge_count, ds.status,
+       ds.next_billing_date, ds.created_at,
+       sp.name AS plan_name, sp.sku_code AS plan_sku
+FROM donation_subscriptions ds
+LEFT JOIN subscription_plans sp ON ds.plan_id = sp.id
+WHERE ds.user_id = $1
+ORDER BY ds.created_at DESC
+`
+
+type ListUserSubscriptionsRow struct {
+	ID                uuid.UUID             `json:"id"`
+	UserID            uuid.UUID             `json:"user_id"`
+	PlanID            pgtype.UUID           `json:"plan_id"`
+	ProjectID         pgtype.UUID           `json:"project_id"`
+	Frequency         SubscriptionFrequency `json:"frequency"`
+	DurationMonths    pgtype.Int4           `json:"duration_months"`
+	CompletedCycles   int32                 `json:"completed_cycles"`
+	UnitQuantity      int32                 `json:"unit_quantity"`
+	CurrencyCode      string                `json:"currency_code"`
+	AmountPerCycle    pgtype.Numeric        `json:"amount_per_cycle"`
+	PaymentMethod     PaymentMethodType     `json:"payment_method"`
+	PaymentProvider   string                `json:"payment_provider"`
+	FailedChargeCount int32                 `json:"failed_charge_count"`
+	Status            SubscriptionStatus    `json:"status"`
+	NextBillingDate   pgtype.Date           `json:"next_billing_date"`
+	CreatedAt         pgtype.Timestamptz    `json:"created_at"`
+	PlanName          pgtype.Text           `json:"plan_name"`
+	PlanSku           pgtype.Text           `json:"plan_sku"`
+}
+
+func (q *Queries) ListUserSubscriptions(ctx context.Context, userID uuid.UUID) ([]ListUserSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listUserSubscriptions, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserSubscriptionsRow
+	for rows.Next() {
+		var i ListUserSubscriptionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.PlanID,
+			&i.ProjectID,
+			&i.Frequency,
+			&i.DurationMonths,
+			&i.CompletedCycles,
+			&i.UnitQuantity,
+			&i.CurrencyCode,
+			&i.AmountPerCycle,
+			&i.PaymentMethod,
+			&i.PaymentProvider,
+			&i.FailedChargeCount,
+			&i.Status,
+			&i.NextBillingDate,
+			&i.CreatedAt,
+			&i.PlanName,
+			&i.PlanSku,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateSubscriptionStatus = `-- name: UpdateSubscriptionStatus :one
+UPDATE donation_subscriptions
+SET status = $2, paused_at = $3, pause_reason = $4
+WHERE id = $1 AND user_id = $5
+RETURNING id, user_id, plan_id, project_id, frequency, duration_months, completed_cycles, unit_quantity, currency_code, amount_per_cycle, payment_method, payment_provider, gateway_customer_id_encrypted, payment_token_encrypted, failed_charge_count, last_failed_at, status, pause_reason, paused_at, last_reminder_sent_at, resume_payment_url, next_billing_date, created_at
+`
+
+type UpdateSubscriptionStatusParams struct {
+	ID          uuid.UUID          `json:"id"`
+	Status      SubscriptionStatus `json:"status"`
+	PausedAt    pgtype.Timestamptz `json:"paused_at"`
+	PauseReason pgtype.Text        `json:"pause_reason"`
+	UserID      uuid.UUID          `json:"user_id"`
+}
+
+func (q *Queries) UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscriptionStatusParams) (DonationSubscriptions, error) {
+	row := q.db.QueryRow(ctx, updateSubscriptionStatus,
+		arg.ID,
+		arg.Status,
+		arg.PausedAt,
+		arg.PauseReason,
+		arg.UserID,
+	)
+	var i DonationSubscriptions
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.PlanID,
+		&i.ProjectID,
+		&i.Frequency,
+		&i.DurationMonths,
+		&i.CompletedCycles,
+		&i.UnitQuantity,
+		&i.CurrencyCode,
+		&i.AmountPerCycle,
+		&i.PaymentMethod,
+		&i.PaymentProvider,
+		&i.GatewayCustomerIDEncrypted,
+		&i.PaymentTokenEncrypted,
+		&i.FailedChargeCount,
+		&i.LastFailedAt,
+		&i.Status,
+		&i.PauseReason,
+		&i.PausedAt,
+		&i.LastReminderSentAt,
+		&i.ResumePaymentUrl,
+		&i.NextBillingDate,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertUserInventoryItem = `-- name: UpsertUserInventoryItem :one
+INSERT INTO user_digital_inventories (id, user_id, product_id, quantity)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, product_id)
+DO UPDATE SET quantity = user_digital_inventories.quantity + EXCLUDED.quantity
+RETURNING id, user_id, product_id, quantity, acquired_at
+`
+
+type UpsertUserInventoryItemParams struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	ProductID uuid.UUID `json:"product_id"`
+	Quantity  int32     `json:"quantity"`
+}
+
+func (q *Queries) UpsertUserInventoryItem(ctx context.Context, arg UpsertUserInventoryItemParams) (UserDigitalInventories, error) {
+	row := q.db.QueryRow(ctx, upsertUserInventoryItem,
+		arg.ID,
+		arg.UserID,
+		arg.ProductID,
+		arg.Quantity,
+	)
+	var i UserDigitalInventories
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ProductID,
+		&i.Quantity,
+		&i.AcquiredAt,
+	)
+	return i, err
 }

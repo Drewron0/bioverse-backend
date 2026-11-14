@@ -41,3 +41,15 @@ FROM donations d
 JOIN conservation_projects cp ON d.project_id = cp.id
 WHERE d.user_id = $1
 ORDER BY d.created_at DESC;
+
+-- name: ListExpiredPendingDonations :many
+SELECT * FROM donations
+WHERE payment_status = 'pending' AND expired_at < NOW()
+LIMIT $1;
+
+-- name: MarkDonationExpired :one
+UPDATE donations
+SET payment_status = 'expired',
+    is_points_locked = false
+WHERE id = $1 AND payment_status = 'pending'
+RETURNING *;
