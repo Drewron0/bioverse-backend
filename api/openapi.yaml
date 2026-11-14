@@ -1,76 +1,123 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
   title: BioVerse API
-  description: >
-    BioVerse is a gamified Ridge-to-Reef ecosystem restoration platform API backend.
-    Powers B2C Flutter mobile app, B2B web dashboard, and Admin back office.
   version: 1.0.0
-  contact:
-    name: BioVerse Engineering Team
-    email: dev@bioverse.id
-
+  description: >-
+    Official API specification for BioVerse marine conservation and Ridge-to-Reef platform.
+    Designed for Flutter mobile consumer clients, Web B2B corporate dashboards, and administrative back-office operations.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 servers:
   - url: http://localhost:8080
     description: Local development environment
-  - url: https://api.staging.bioverse.id
-    description: Staging environment
+  - url: https://api.bioverse.id
+    description: Production environment (AWS ECS - Planned)
+
+tags:
+  - name: Health
+    description: Service health and readiness probes
+  - name: App Auth
+    description: Consumer mobile authentication and session management (Phase 1)
+  - name: User Profile
+    description: Mobile user profile, settings, avatar, and push notifications (Phase 1)
+  - name: Uploads
+    description: Presigned S3/MinIO object upload authorization
+  - name: Conservation
+    description: Marine restoration projects, spider frames, and adopted corals (Phase 2)
+  - name: Donations
+    description: Checkout, payment methods, point redemption, and donation history (Phases 3-4)
+  - name: Virtual Pets
+    description: Ridge-to-Reef companion lifecycle, feeding, and evolution (Phase 6 - Planned)
+  - name: Eco-Missions
+    description: Action-based missions, photo proof submission, and async CV verification (Phase 6 - Planned)
+  - name: Streaks & Leaderboard
+    description: Daily eco-streaks and public donation rankings (Phase 6 - Planned)
+  - name: Shop & Inventory
+    description: Digital cosmetic shop, inventory bag, and streak protection items (Phase 7 - Planned)
+  - name: Subscriptions
+    description: Recurring coral adoption maintenance plans (Phase 7 - Planned)
+  - name: Admin Field Operations
+    description: Operator KYC, work logs, milestone photo evidence, and payouts (Phase 8 - Admin)
+  - name: Admin B2B & ESG
+    description: Corporate ESG contracts, quota management, and audit reports (Phase 9 - Admin)
+  - name: Webhooks
+    description: External payment gateway callbacks and automated reconciliations
 
 paths:
   /healthz:
     get:
+      tags:
+        - Health
       summary: Liveness health check
       description: Returns 200 OK if the HTTP server process is running.
+      operationId: checkLiveness
+      security: []
       responses:
         '200':
-          description: Service is alive
+          description: Server is live
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
+                $ref: '#/components/schemas/HealthStatus'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /livez:
     get:
-      summary: Kubernetes liveness probe
+      tags:
+        - Health
+      summary: Container liveness probe
+      description: Lightweight ECS/container liveness probe returning OK.
+      operationId: checkContainerLiveness
+      security: []
       responses:
         '200':
-          description: Process is responsive
+          description: Container is alive
           content:
-            application/json:
+            text/plain:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
+                type: string
+                example: OK
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/health:
     get:
+      tags:
+        - Health
       summary: Readiness health check
-      description: Returns health status of the application and internal dependencies (database).
+      description: Returns status of internal infrastructure dependencies (PostgreSQL database).
+      operationId: checkReadiness
+      security: []
       responses:
         '200':
-          description: All critical systems healthy
+          description: Application and database are healthy
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                $ref: '#/components/schemas/HealthStatus'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '503':
-          description: Degraded system state
+          description: Application or database is degraded
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                $ref: '#/components/schemas/ProblemDetails'
 
   /v1/app/auth/register:
     post:
       tags:
         - App Auth
-      summary: Register a new user account
-      description: Creates a new user profile with default USD currency, zero streak counter, and initial auth tokens.
+      summary: Register mobile user account
+      description: Creates a new consumer user profile with email and password.
+      operationId: registerUser
+      security: []
       requestBody:
         required: true
         content:
@@ -79,29 +126,26 @@ paths:
               $ref: '#/components/schemas/RegisterRequest'
       responses:
         '201':
-          description: User successfully registered and authenticated
+          description: Account created successfully
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
         '400':
-          description: Validation error
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/BadRequestError'
         '409':
-          description: Email already registered
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/ConflictError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/auth/login:
     post:
       tags:
         - App Auth
-      summary: Authenticate user with email and password
+      summary: Login with email and password
+      description: Authenticates user credentials and returns JWT access and refresh tokens.
+      operationId: loginUser
+      security: []
       requestBody:
         required: true
         content:
@@ -116,171 +160,464 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
         '400':
-          description: Invalid credentials format
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/BadRequestError'
         '401':
-          description: Incorrect email or password
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/auth/refresh:
+  /v1/app/auth/google:
     post:
       tags:
         - App Auth
-      summary: Rotate refresh token and issue new access token
+      summary: Login or sign up with Google
+      description: Authenticates user using Google ID token issued by Android/iOS Google Sign-In SDK.
+      operationId: loginWithGoogle
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RefreshRequest'
+              $ref: '#/components/schemas/GoogleLoginRequest'
       responses:
         '200':
-          description: New token pair issued
+          description: Google authentication successful
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
-          description: Invalid or expired refresh token
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/auth/refresh:
+    post:
+      tags:
+        - App Auth
+      summary: Refresh access token
+      description: Exchanges a valid refresh token for a newly signed JWT access token.
+      operationId: refreshAuthToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed successfully
           content:
-            application/problem+json:
+            application/json:
               schema:
-                $ref: '#/components/schemas/ProblemDetails'
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/auth/forgot-password:
+    post:
+      tags:
+        - App Auth
+      summary: Request password reset email
+      description: Sends a password reset token via Resend transactional email if the email exists.
+      operationId: requestForgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+      responses:
+        '200':
+          description: Password reset link dispatched if email exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/auth/reset-password:
+    post:
+      tags:
+        - App Auth
+      summary: Reset password with token
+      description: Resets user password using the verification token delivered via email.
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password reset successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/auth/verify-email:
+    post:
+      tags:
+        - App Auth
+      summary: Verify email address
+      description: Verifies user email using the token received in registration confirmation email.
+      operationId: verifyEmailAddress
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+      responses:
+        '200':
+          description: Email verified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/auth/logout:
+    post:
+      tags:
+        - App Auth
+      summary: Logout user session
+      description: Revokes the specified refresh token in the database.
+      operationId: logoutUser
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: User logged out successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/users/me:
     get:
       tags:
-        - App Users
-      summary: Get authenticated user profile
+        - User Profile
+      summary: Get current user profile
+      description: Retrieves complete authenticated profile, points balance, locked points, and referral code.
+      operationId: getCurrentUserProfile
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: User profile loaded
+          description: User profile details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserProfileResponse'
+                $ref: '#/components/schemas/UserProfile'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      tags:
+        - User Profile
+      summary: Update user profile
+      description: Updates editable profile fields such as full name, phone number, and avatar object key.
+      operationId: updateCurrentUserProfile
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserProfileRequest'
+      responses:
+        '200':
+          description: Updated profile details
           content:
-            application/problem+json:
+            application/json:
               schema:
-                $ref: '#/components/schemas/ProblemDetails'
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/users/fcm-token:
+    post:
+      tags:
+        - User Profile
+      summary: Register mobile device FCM push token
+      description: Upserts Firebase Cloud Messaging token for push notifications.
+      operationId: registerFcmToken
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FcmTokenRequest'
+      responses:
+        '200':
+          description: FCM token registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/uploads/presign:
+    post:
+      tags:
+        - Uploads
+      summary: Request presigned S3/MinIO upload URL
+      description: Returns an upload authorization URL and S3 object key for direct client upload.
+      operationId: requestPresignedUpload
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignedUploadRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/conservation/projects:
     get:
       tags:
         - Conservation
-      summary: List all active conservation restoration projects
+      summary: List restoration projects
+      description: Retrieves available coral reef restoration projects with funding and urgent status.
+      operationId: listConservationProjects
+      security: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ProjectStatus'
+        - name: is_urgent
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
       responses:
         '200':
-          description: List of projects
+          description: List of active conservation projects
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  projects:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/ConservationProject'
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConservationProject'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/conservation/projects/{id}:
     get:
       tags:
         - Conservation
-      summary: Get conservation project details
+      summary: Get restoration project detail
+      description: Retrieves detailed project specs including target corals, funded corals, and spider frames.
+      operationId: getConservationProjectById
+      security: []
       parameters:
         - name: id
           in: path
           required: true
+          description: Unique project UUID
           schema:
             type: string
             format: uuid
       responses:
         '200':
-          description: Project details
+          description: Project detail data
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConservationProject'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '404':
-          description: Project not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/conservation/corals/my:
     get:
       tags:
         - Conservation
-      summary: List adopted coral fragments belonging to the authenticated user
+      summary: List user's adopted corals
+      description: Retrieves all coral fragments adopted by the authenticated user with tags and health status.
+      operationId: listMyAdoptedCorals
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: User coral fragments
+          description: Collection of adopted corals
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  corals:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/AdoptedCoral'
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdoptedCoral'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/catalog/products:
+  /v1/app/conservation/corals/{id}:
     get:
       tags:
-        - Catalog
-      summary: List digital shop products (Streak Freeze, XP Boost, Skins)
+        - Conservation
+      summary: Get adopted coral detail
+      description: Retrieves specific adopted coral details, tag, spider frame position, and planting date.
+      operationId: getAdoptedCoralById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique coral fragment adoption UUID
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: Products list
+          description: Adopted coral details
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  products:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/DigitalProduct'
+                $ref: '#/components/schemas/AdoptedCoral'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/catalog/plans:
+  /v1/app/conservation/corals/{id}/timeline:
     get:
       tags:
-        - Catalog
-      summary: List subscription maintenance plans (BioVerse Plus)
+        - Conservation
+      summary: Get adopted coral milestone photo timeline
+      description: Retrieves photographic monitoring updates for months 1, 3, and 6 verified by field operators.
+      operationId: getAdoptedCoralTimeline
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique coral fragment adoption UUID
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: Subscription plans
+          description: Timeline milestone photos and growth stats
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  plans:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/SubscriptionPlan'
+                type: array
+                items:
+                  $ref: '#/components/schemas/CoralMilestoneUpdate'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/donations/checkout:
     post:
       tags:
         - Donations
-      summary: Create donation checkout with atomic idempotency and points locking
+      summary: Create donation checkout
+      description: >-
+        Initiates a single donation checkout with Xendit Sandbox payment methods (QRIS, VA) or points.
+        Bio-Shield add-on must be purchased as a dedicated checkout with donation_type=bio_shield_addon.
+      operationId: createDonationCheckout
       security:
         - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique client-generated UUID to guarantee atomic idempotency
+          schema:
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -289,117 +626,129 @@ paths:
               $ref: '#/components/schemas/DonationCheckoutRequest'
       responses:
         '201':
-          description: Checkout created with payment instructions (QRIS / VA)
+          description: Checkout created with payment details
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DonationCheckoutResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
         '403':
-          description: Coral-First Gating failed (Bio-Shield requested without owning a coral)
+          description: Coral-First Gating failed (must have active adopted coral to buy Bio-Shield)
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/donations/{id}:
     get:
       tags:
         - Donations
-      summary: Get donation payment status and countdown
+      summary: Get donation status
+      description: Retrieves transaction status, payment details, and expiration countdown.
+      operationId: getDonationById
       security:
         - BearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
+          description: Unique donation UUID
           schema:
             type: string
             format: uuid
       responses:
         '200':
-          description: Donation record details
+          description: Donation transaction details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DonationCheckoutResponse'
+                $ref: '#/components/schemas/DonationDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/donations/my:
+  /v1/app/donations:
     get:
       tags:
         - Donations
-      summary: Get authenticated user donation history
+      summary: List user donation history
+      description: Retrieves paginated history of past donations with filter options.
+      operationId: listDonationHistory
       security:
         - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DonationStatus'
+        - name: donation_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DonationType'
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor for keyset pagination
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: List of user donations
+          description: Paginated donation history
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  donations:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/DonationCheckoutResponse'
-
-  /v1/webhooks/xendit/simulate-paid:
-    post:
-      tags:
-        - Donations
-      summary: Simulate payment settlement webhook (Sandbox & Testing)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - donation_id
-              properties:
-                donation_id:
-                  type: string
-                  format: uuid
-                target_pet_id:
-                  type: string
-                  format: uuid
-                coral_nickname:
-                  type: string
-      responses:
-        '200':
-          description: Payment processed, spider frame assigned, and fragments allocated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: paid
+                $ref: '#/components/schemas/PaginatedDonations'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/pets:
     get:
       tags:
-        - Gamification
-      summary: List virtual pets owned by user
+        - Virtual Pets
+      summary: List user virtual pets
+      description: Retrieves virtual companion pets (Acep, Budi) adopted by the user.
+      operationId: listUserPets
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: User pets list
+          description: List of virtual pets
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  pets:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/VirtualPet'
+                type: array
+                items:
+                  $ref: '#/components/schemas/VirtualPet'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
       tags:
-        - Gamification
-      summary: Adopt a new virtual pet companion
+        - Virtual Pets
+      summary: Adopt new virtual pet
+      description: Creates a new virtual companion (e.g. Acep the Sea Turtle).
+      operationId: adoptVirtualPet
       security:
         - BearerAuth: []
       requestBody:
@@ -407,90 +756,66 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdoptPetRequest'
+              $ref: '#/components/schemas/CreatePetRequest'
       responses:
         '201':
-          description: Pet companion adopted
+          description: Pet adopted successfully
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/VirtualPet'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/pets/{id}:
     get:
       tags:
-        - Gamification
-      summary: Get virtual pet details
+        - Virtual Pets
+      summary: Get virtual pet detail
+      description: Retrieves level, health percent, XP, and growth stage for a specific pet.
+      operationId: getVirtualPetById
       security:
         - BearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
+          description: Pet UUID
           schema:
             type: string
             format: uuid
       responses:
         '200':
-          description: Virtual pet details
+          description: Pet details
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/VirtualPet'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/pets/{id}/interact:
     post:
       tags:
-        - Gamification
-      summary: Feed / interact with virtual pet to restore health and gain XP
+        - Virtual Pets
+      summary: Interact with virtual pet
+      description: Feed or care for companion to boost health and earn pet XP.
+      operationId: interactWithPet
       security:
         - BearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: Interaction updated pet
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VirtualPet'
-
-  /v1/app/missions:
-    get:
-      tags:
-        - Gamification
-      summary: List active eco-missions
-      security:
-        - BearerAuth: []
-      responses:
-        '200':
-          description: Active eco-missions list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  missions:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/EcoMission'
-
-  /v1/app/missions/{id}/submit:
-    post:
-      tags:
-        - Gamification
-      summary: Submit camera proof for an eco-mission with Computer Vision verification
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
+          description: Pet UUID
           schema:
             type: string
             format: uuid
@@ -499,36 +824,127 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - proof_image_url
-              properties:
-                proof_image_url:
-                  type: string
-                  format: uri
-                  example: https://storage.bioverse.id/proofs/tumbler.jpg
-                target_pet_id:
-                  type: string
-                  format: uuid
+              $ref: '#/components/schemas/PetInteractionRequest'
       responses:
         '200':
-          description: Mission verified, XP and Points awarded, streak updated
+          description: Interaction recorded
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MissionSubmissionResult'
+                $ref: '#/components/schemas/PetInteractionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/missions:
+    get:
+      tags:
+        - Eco-Missions
+      summary: List daily eco-action missions
+      description: Retrieves active missions with point rewards and verification requirements.
+      operationId: listEcoMissions
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Available eco missions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EcoMission'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/missions/{id}/submit:
+    post:
+      tags:
+        - Eco-Missions
+      summary: Submit photo proof for eco-mission
+      description: Submits uploaded object key for asynchronous Computer Vision validation. Returns 202 Accepted.
+      operationId: submitMissionProof
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Mission UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionSubmissionRequest'
+      responses:
+        '202':
+          description: Submission accepted for asynchronous processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionSubmissionReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
         '409':
-          description: Daily mission already submitted today
+          description: Mission already completed today
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/mission-submissions/{id}:
+    get:
+      tags:
+        - Eco-Missions
+      summary: Check mission proof submission status
+      description: Polls status of Computer Vision validation for a mission submission.
+      operationId: getMissionSubmissionStatus
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Submission UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current verification status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionSubmissionDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/streaks:
     get:
       tags:
-        - Gamification
-      summary: Get current streak and freeze status
+        - Streaks & Leaderboard
+      summary: Get user daily eco-streak
+      description: Returns consecutive active days and automated streak freeze protection status.
+      operationId: getUserStreak
       security:
         - BearerAuth: []
       responses:
@@ -538,43 +954,87 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserStreak'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/leaderboard:
     get:
       tags:
-        - Gamification
-      summary: Get global user leaderboard ranking
-      security:
-        - BearerAuth: []
+        - Streaks & Leaderboard
+      summary: Get donation ranking leaderboard
+      description: Returns top supporters ranked by donation amount, filtered by period and category.
+      operationId: getDonationLeaderboard
+      security: []
       parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all_time, this_month, this_year]
+            default: all_time
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, coral, tree]
+            default: all
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
         - name: limit
           in: query
+          required: false
           schema:
             type: integer
             default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
       responses:
         '200':
           description: Leaderboard rankings
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  leaderboard:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/LeaderboardEntry'
+                $ref: '#/components/schemas/LeaderboardResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/catalog/products:
+    get:
+      tags:
+        - Shop & Inventory
+      summary: List digital shop products
+      description: Retrieves cosmetics, pet skins, and streak freeze utility items with points and IDR prices.
+      operationId: listDigitalProducts
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Digital shop catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DigitalProduct'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/shop/buy:
     post:
       tags:
         - Shop & Inventory
-      summary: Buy digital product with points
+      summary: Buy digital item with points
+      description: Purchases a cosmetic or streak freeze item and deposits it directly into user inventory.
+      operationId: buyDigitalProduct
       security:
         - BearerAuth: []
       requestBody:
@@ -582,29 +1042,28 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - product_id
-              properties:
-                product_id:
-                  type: string
-                  format: uuid
-                quantity:
-                  type: integer
-                  default: 1
+              $ref: '#/components/schemas/BuyProductRequest'
       responses:
         '200':
-          description: Product purchased and added to inventory
+          description: Item purchased successfully
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/BuyProductResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/inventory:
     get:
       tags:
         - Shop & Inventory
-      summary: List authenticated user's digital inventory
+      summary: Get user digital inventory
+      description: Retrieves all owned digital items (cosmetics, badges, streak freezes).
+      operationId: getUserInventory
       security:
         - BearerAuth: []
       responses:
@@ -613,28 +1072,43 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type: array
+                items:
+                  $ref: '#/components/schemas/InventoryItem'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/inventory/streak-freeze/use:
-    post:
+  /v1/app/catalog/plans:
+    get:
       tags:
-        - Shop & Inventory
-      summary: Consume one streak freeze item to protect daily streak
-      security:
-        - BearerAuth: []
+        - Subscriptions
+      summary: List recurring adoption maintenance plans
+      description: Retrieves subscription tiers with amounts, billing intervals, and included impact units.
+      operationId: listSubscriptionPlans
+      security: []
       responses:
         '200':
-          description: Streak freeze applied
+          description: Available subscription plans
           content:
             application/json:
               schema:
-                type: object
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionPlan'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/subscriptions:
     post:
       tags:
         - Subscriptions
-      summary: Subscribe to maintenance plan (BioVerse Plus)
+      summary: Create recurring adoption subscription
+      description: Initiates a recurring maintenance subscription with payment token authorization URL.
+      operationId: createSubscription
       security:
         - BearerAuth: []
       requestBody:
@@ -642,186 +1116,510 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - plan_id
-              properties:
-                plan_id:
-                  type: string
-                  format: uuid
-                payment_method:
-                  type: string
-                  default: ewallet
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
       responses:
         '201':
-          description: Subscription created
+          description: Subscription initiated
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/SubscriptionDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /v1/app/subscriptions/my:
     get:
       tags:
         - Subscriptions
-      summary: List user's subscriptions
+      summary: List user active subscriptions
+      description: Retrieves recurring subscriptions owned by authenticated user.
+      operationId: listMySubscriptions
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: User subscriptions list
+          description: User subscriptions
           content:
             application/json:
               schema:
-                type: object
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/fieldops/operators:
+  /v1/app/subscriptions/{id}/pause:
     post:
       tags:
-        - Field Operations
-      summary: Register field operator with encrypted NIK & Bank KYC
+        - Subscriptions
+      summary: Pause active subscription
+      description: Pauses recurring billing for the specified subscription.
+      operationId: pauseSubscription
       security:
         - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Subscription UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscription paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/subscriptions/{id}/resume:
+    post:
+      tags:
+        - Subscriptions
+      summary: Resume paused subscription
+      description: Resumes billing schedule for a paused subscription.
+      operationId: resumeSubscription
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Subscription UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscription resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/subscriptions/{id}/cancel:
+    post:
+      tags:
+        - Subscriptions
+      summary: Cancel subscription
+      description: Cancels recurring billing at the end of the current period.
+      operationId: cancelSubscription
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Subscription UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscription cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/auth/login:
+    post:
+      tags:
+        - Admin Field Operations
+      summary: Admin console login
+      description: Authenticates back-office administrators and operations staff.
+      operationId: adminLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Admin session authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/fieldops/operators:
+    post:
+      tags:
+        - Admin Field Operations
+      summary: Register field operator (Admin only)
+      description: Onboards local diver/operator with AES-256-GCM encrypted NIK and bank info.
+      operationId: registerFieldOperator
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOperatorRequest'
       responses:
         '201':
-          description: Field operator created
+          description: Operator KYC registered
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/OperatorDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/fieldops/work-logs:
+  /v1/admin/fieldops/work-logs:
     post:
       tags:
-        - Field Operations
-      summary: Record field work log (planting or maintenance)
+        - Admin Field Operations
+      summary: Record coral planting work log (Admin only)
+      description: Records diver planting session and allocates coral tags onto spider frames.
+      operationId: recordFieldWorkLog
       security:
         - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkLogRequest'
       responses:
         '201':
           description: Work log recorded
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/WorkLogDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/fieldops/media:
+  /v1/admin/fieldops/media:
     post:
       tags:
-        - Field Operations
-      summary: Record milestone photo evidence (months 1, 3, 6)
+        - Admin Field Operations
+      summary: Submit milestone media evidence (Admin only)
+      description: Submits photographic monitoring proof for months 1, 3, or 6.
+      operationId: submitFieldMilestoneMedia
       security:
         - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitMediaRequest'
       responses:
         '201':
-          description: Milestone evidence recorded
+          description: Milestone media recorded
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/CoralMilestoneUpdate'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/app/fieldops/payouts:
+  /v1/admin/fieldops/payouts:
     post:
       tags:
-        - Field Operations
-      summary: Create operator payout batch
+        - Admin Field Operations
+      summary: Disburse operator payout batch (Admin only)
+      description: Initiates bank disbursement batch for verified planting operations.
+      operationId: disburseOperatorPayouts
       security:
         - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePayoutBatchRequest'
       responses:
         '201':
-          description: Operator payout batch created
+          description: Payout batch processed
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/PayoutBatchDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/b2b/companies:
+  /v1/admin/b2b/companies:
     post:
       tags:
-        - B2B & ESG
-      summary: Register corporate partner company
+        - Admin B2B & ESG
+      summary: Onboard corporate CSR client (Admin only)
+      description: Registers enterprise client profile for CSR partnerships.
+      operationId: createB2bCompany
       security:
         - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCompanyRequest'
       responses:
         '201':
-          description: Company created
+          description: Corporate company onboarded
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/B2bCompanyDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/b2b/companies/{id}/contracts:
+  /v1/admin/b2b/companies/{id}/contracts:
     post:
       tags:
-        - B2B & ESG
-      summary: Create B2B sponsorship contract and allocate employee adoption quota
+        - Admin B2B & ESG
+      summary: Create corporate contract and quota (Admin only)
+      description: Allocates sponsored coral/tree adoption quotas to a corporate partner.
+      operationId: createB2bContract
       security:
         - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContractRequest'
       responses:
         '201':
           description: Contract and quota created
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/B2bContractDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/b2b/quotas/{id}/claim:
+  /v1/admin/b2b/companies/{id}/esg/metrics:
     post:
       tags:
-        - B2B & ESG
-      summary: Claim sponsored adoption quota by employee
+        - Admin B2B & ESG
+      summary: Record POJK 51 ESG biodiversity metric (Admin only)
+      description: Records calculated coral survival rate, biomass increase, and community livelihood metric.
+      operationId: recordB2bEsgMetrics
       security:
         - BearerAuth: []
-      responses:
-        '200':
-          description: Quota claimed
-          content:
-            application/json:
-              schema:
-                type: object
-
-  /v1/b2b/companies/{id}/esg/metrics:
-    post:
-      tags:
-        - B2B & ESG
-      summary: Record POJK 51/2017 & GRI 101 biodiversity metric
-      security:
-        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordEsgMetricRequest'
       responses:
         '201':
           description: Metric recorded
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /v1/b2b/companies/{id}/esg/reports:
+  /v1/admin/b2b/companies/{id}/esg/reports:
     post:
       tags:
-        - B2B & ESG
-      summary: Generate ESG audit compliance report
+        - Admin B2B & ESG
+      summary: Generate POJK 51 ESG audit report (Admin only)
+      description: Compiles certified ESG PDF/CSV audit documentation.
+      operationId: generateB2bEsgReport
       security:
         - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateEsgReportRequest'
       responses:
         '201':
-          description: ESG audit report created
+          description: ESG audit report generated
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/EsgReportDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     get:
       tags:
-        - B2B & ESG
-      summary: List company ESG audit reports
+        - Admin B2B & ESG
+      summary: List corporate ESG audit reports
+      description: Retrieves generated ESG audit reports for the company.
+      operationId: listB2bEsgReports
       security:
         - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: List of audit reports
           content:
             application/json:
               schema:
-                type: object
+                type: array
+                items:
+                  $ref: '#/components/schemas/EsgReportDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/webhooks/xendit:
+    post:
+      tags:
+        - Webhooks
+      summary: Official Xendit payment webhook callback
+      description: Receives cryptographically signed callbacks from Xendit gateway when an invoice or payment is settled.
+      operationId: handleXenditWebhook
+      security: []
+      parameters:
+        - name: x-callback-token
+          in: header
+          required: true
+          description: Verification token configured in Xendit Dashboard
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/XenditWebhookPayload'
+      responses:
+        '200':
+          description: Callback processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
   securitySchemes:
@@ -829,31 +1627,166 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: User or Administrator JWT token
+
+  responses:
+    BadRequestError:
+      description: Bad request / validation failure
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    UnauthorizedError:
+      description: Authentication token missing or invalid
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ForbiddenError:
+      description: Insufficient permissions or role requirement failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFoundError:
+      description: Requested resource was not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ConflictError:
+      description: Resource conflict or duplicate invariant violation
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
 
   schemas:
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          example: urn:bioverse:error:bad_request
+        title:
+          type: string
+          example: Bad Request
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: Validation failed on field quantity
+        instance:
+          type: string
+          example: /v1/app/donations/checkout
+
+    StandardSuccessResponse:
+      type: object
+      required:
+        - success
+        - message
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+          example: ok
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          example: 1.0.0
+
+    ProjectStatus:
+      type: string
+      enum: [draft, funding, active, completed, suspended]
+      example: active
+
+    DonationStatus:
+      type: string
+      enum: [pending, paid, expired, failed, refunded]
+      example: paid
+
+    DonationType:
+      type: string
+      enum: [coral_adoption, tree_planting, bio_shield_addon, sponsored_quota]
+      example: coral_adoption
+
+    PaymentMethodType:
+      type: string
+      enum: [virtual_account, qris, card, points_only, sponsored_quota]
+      example: virtual_account
+
+    BankCode:
+      type: string
+      enum: [BCA, BRI, BNI, MANDIRI, PERMATA]
+      example: BCA
+
+    CoralHealthStatus:
+      type: string
+      enum: [thriving, stable, bleached, critical, deceased]
+      example: thriving
+
+    PetGrowthStage:
+      type: string
+      enum: [hatchling, juvenile, sub_adult, adult, ancient]
+      example: hatchling
+
+    SubmissionStatus:
+      type: string
+      enum: [submitted, processing, verified, needs_review, rejected]
+      example: processing
+
     RegisterRequest:
       type: object
       required:
-        - full_name
         - email
         - password
+        - full_name
       properties:
-        full_name:
-          type: string
-          example: Budi Pratama
         email:
           type: string
           format: email
-          example: budi@bioverse.id
+          example: user@example.com
         password:
           type: string
           format: password
           minLength: 8
-          example: P@ssword123!
-        timezone:
+          example: SecureP@ssw0rd!
+        full_name:
           type: string
-          default: Asia/Jakarta
-          example: Asia/Jakarta
+          example: Budi Samudera
+        phone_number:
+          type: string
+          example: "+6281234567890"
+        referral_code:
+          type: string
+          example: REEF2026
 
     LoginRequest:
       type: object
@@ -864,26 +1797,64 @@ components:
         email:
           type: string
           format: email
-          example: budi@bioverse.id
+          example: user@example.com
         password:
           type: string
           format: password
-          example: P@ssword123!
-        device_info:
-          type: string
-          example: Flutter Android Pixel 7
+          example: SecureP@ssw0rd!
 
-    RefreshRequest:
+    GoogleLoginRequest:
+      type: object
+      required:
+        - id_token
+      properties:
+        id_token:
+          type: string
+          description: OpenID Connect token issued by Google SDK
+          example: eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...
+
+    RefreshTokenRequest:
       type: object
       required:
         - refresh_token
       properties:
         refresh_token:
           type: string
-          example: 9a7b3c2d1e4f...
-        device_info:
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+    ForgotPasswordRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
           type: string
-          example: Flutter Android Pixel 7
+          format: email
+          example: user@example.com
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - token
+        - new_password
+      properties:
+        token:
+          type: string
+          example: 6f8d3c1a-7b2e-4f5a-9c8d-1e2f3a4b5c6d
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          example: NewStr0ngP@ss!
+
+    VerifyEmailRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          example: 3b1a2c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d
 
     AuthResponse:
       type: object
@@ -892,445 +1863,1204 @@ components:
         - refresh_token
         - token_type
         - expires_in
-        - user
       properties:
         access_token:
           type: string
-          description: 15-minute JWT Bearer token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         refresh_token:
           type: string
-          description: Rotating refresh token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         token_type:
           type: string
           example: Bearer
         expires_in:
           type: integer
-          example: 900
+          example: 3600
         user:
-          $ref: '#/components/schemas/UserProfileResponse'
+          $ref: '#/components/schemas/UserProfile'
 
-    UserProfileResponse:
+    UserProfile:
       type: object
       required:
         - id
-        - full_name
         - email
-        - timezone
-        - preferred_currency_code
+        - full_name
         - points_balance
-        - current_streak
+        - locked_points_balance
+        - is_email_verified
+        - created_at
       properties:
         id:
           type: string
           format: uuid
-        full_name:
-          type: string
-          example: Budi Pratama
         email:
           type: string
-          example: budi@bioverse.id
-        timezone:
+          format: email
+        full_name:
           type: string
-          example: Asia/Jakarta
-        preferred_currency_code:
+        phone_number:
           type: string
-          example: USD
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        referral_code:
+          type: string
         points_balance:
           type: integer
-          example: 120
-        current_streak:
+          example: 250
+        locked_points_balance:
           type: integer
-          example: 3
-
-    ConservationProject:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        title:
-          type: string
-          example: Biorock Coral Restoration Pemuteran
-        description:
-          type: string
-        category:
-          type: string
-          example: coral
-        species_or_type_name:
-          type: string
-          example: Acropora & Pocillopora
-        image_url:
-          type: string
-        price_per_unit_money:
-          type: string
-          example: '3.20'
-        currency_code:
-          type: string
-          example: USD
-        target_units:
-          type: integer
-          example: 1500
-        funded_units_count:
-          type: integer
-          example: 420
-        planted_units_count:
-          type: integer
-          example: 300
-        surviving_units_count:
-          type: integer
-          example: 285
-
-    AdoptedCoral:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        fragment_code:
-          type: string
-          example: CR-BALI-001-01
-        frame_code:
-          type: string
-          example: SF-BALI-001
-        nickname:
-          type: string
-          example: Coral Acep
-        lifecycle_status:
-          type: string
-          example: planted
-        health_percent:
-          type: integer
-          example: 100
-        planted_at:
+          example: 0
+        is_email_verified:
+          type: boolean
+          example: true
+        created_at:
           type: string
           format: date-time
 
-    DigitalProduct:
+    UpdateUserProfileRequest:
       type: object
       properties:
-        id:
+        full_name:
           type: string
-          format: uuid
-        sku_code:
+          example: Budi Pratama Samudera
+        phone_number:
           type: string
-          example: STREAK_FREEZE_1X
-        name:
+          example: "+6281234567890"
+        avatar_object_key:
           type: string
-          example: Streak Freeze
-        description:
-          type: string
-        item_type:
-          type: string
-          example: streak_freeze
-        price_points:
-          type: integer
-          example: 150
-        preview_asset_url:
-          type: string
+          example: avatars/01a1d9e4-b3c4-7e54-8795-192296827d75.jpg
 
-    SubscriptionPlan:
+    FcmTokenRequest:
       type: object
+      required:
+        - fcm_token
+        - device_type
+      properties:
+        fcm_token:
+          type: string
+          example: cZ7wX9Y...
+        device_type:
+          type: string
+          enum: [android, ios, web]
+          example: android
+
+    PresignedUploadRequest:
+      type: object
+      required:
+        - file_name
+        - content_type
+        - purpose
+      properties:
+        file_name:
+          type: string
+          example: proof_beach_cleanup.jpg
+        content_type:
+          type: string
+          example: image/jpeg
+        purpose:
+          type: string
+          enum: [avatar, mission_proof, field_evidence]
+          example: mission_proof
+
+    PresignedUploadResponse:
+      type: object
+      required:
+        - upload_url
+        - object_key
+        - expires_in_seconds
+      properties:
+        upload_url:
+          type: string
+          example: https://storage.bioverse.id/uploads/proof_beach_cleanup.jpg?X-Amz-Signature=...
+        object_key:
+          type: string
+          example: mission_proofs/01a1d9e4-b3c4-7e54-8795-192296827d75.jpg
+        expires_in_seconds:
+          type: integer
+          example: 900
+
+    ConservationProject:
+      type: object
+      required:
+        - id
+        - slug
+        - title
+        - description
+        - location_name
+        - latitude
+        - longitude
+        - status
+        - is_urgent
+        - target_amount
+        - funded_amount
+        - target_corals
+        - adopted_corals
+        - created_at
       properties:
         id:
           type: string
           format: uuid
-        sku_code:
+        slug:
           type: string
-          example: BIOVERSE_PLUS_MONTHLY
-        name:
+          example: bunaken-marine-park-reef
+        title:
           type: string
-          example: BioVerse Plus Monthly
+          example: Bunaken Marine Park Coral Restoration
         description:
           type: string
-        billing_interval:
+        location_name:
           type: string
-          example: monthly
+          example: Bunaken, Manado, North Sulawesi
+        latitude:
+          type: number
+          example: 1.6214
+        longitude:
+          type: number
+          example: 124.7571
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        is_urgent:
+          type: boolean
+          example: true
+        target_amount:
+          type: string
+          example: "50000000.00"
+        funded_amount:
+          type: string
+          example: "32000000.00"
+        target_corals:
+          type: integer
+          example: 1000
+        adopted_corals:
+          type: integer
+          example: 640
+        estimated_planting_date:
+          type: string
+          format: date
+          example: "2026-12-01"
+        cover_image_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    AdoptedCoral:
+      type: object
+      required:
+        - id
+        - certificate_number
+        - fragment_tag
+        - project_name
+        - species_name
+        - species_scientific_name
+        - health_status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        certificate_number:
+          type: string
+          example: BV-CORAL-2026-000142
+        fragment_tag:
+          type: string
+          example: TAG-BNK-A12-04
+        project_name:
+          type: string
+          example: Bunaken Marine Park Coral Restoration
+        project_location:
+          type: string
+          example: Bunaken, North Sulawesi
+        species_name:
+          type: string
+          example: Staghorn Coral
+        species_scientific_name:
+          type: string
+          example: Acropora cervicornis
+        health_status:
+          $ref: '#/components/schemas/CoralHealthStatus'
+        planted_at:
+          type: string
+          format: date-time
+          nullable: true
+        spider_frame_tag:
+          type: string
+          nullable: true
+          example: SF-BNK-001
+        latest_photo_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CoralMilestoneUpdate:
+      type: object
+      required:
+        - milestone_month
+        - photo_url
+        - health_status
+        - growth_cm
+        - verified_at
+      properties:
+        milestone_month:
+          type: integer
+          enum: [1, 3, 6]
+          example: 1
+        photo_url:
+          type: string
+        health_status:
+          $ref: '#/components/schemas/CoralHealthStatus'
+        growth_cm:
+          type: number
+          example: 1.45
+        notes:
+          type: string
+          nullable: true
+        verified_at:
+          type: string
+          format: date-time
 
     DonationCheckoutRequest:
       type: object
       required:
-        - project_id
-        - unit_quantity
-        - payment_method
+        - donation_type
+        - payment_method_type
+        - points_to_burn
       properties:
-        idempotency_key:
-          type: string
-          format: uuid
-          example: 0193297a-96e0-7988-9271-e0e649ce4999
+        donation_type:
+          $ref: '#/components/schemas/DonationType'
         project_id:
           type: string
           format: uuid
-        unit_quantity:
+          description: Required for coral_adoption and tree_planting
+        quantity:
           type: integer
           minimum: 1
-          example: 1
-        include_bio_shield:
-          type: boolean
-          default: false
-        target_pet_id:
+          default: 1
+        payment_method_type:
+          $ref: '#/components/schemas/PaymentMethodType'
+        bank_code:
+          allOf:
+            - $ref: '#/components/schemas/BankCode'
+          description: Required when payment_method_type is virtual_account
+        sponsor_quota_id:
           type: string
           format: uuid
-        coral_nickname:
-          type: string
-          example: Budi's Coral
-        points_to_use:
+          description: Required when payment_method_type is sponsored_quota
+        points_to_burn:
           type: integer
+          minimum: 0
           default: 0
-        payment_method:
-          type: string
-          enum: [qris, bca_va, mandiri_va, bri_va, bni_va, ewallet]
-          example: qris
+        is_anonymous:
+          type: boolean
+          default: false
 
     DonationCheckoutResponse:
       type: object
+      required:
+        - donation_id
+        - donation_type
+        - status
+        - gross_amount
+        - discount_amount
+        - net_payable_amount
+        - currency_code
+        - points_burned
+        - payment_method_type
+        - expired_at
+        - created_at
       properties:
         donation_id:
           type: string
           format: uuid
-        idempotency_key:
+        donation_type:
+          $ref: '#/components/schemas/DonationType'
+        status:
+          $ref: '#/components/schemas/DonationStatus'
+        gross_amount:
           type: string
-        gross_project_value:
+          example: "150000.00"
+        discount_amount:
           type: string
-          example: '3.20'
-        money_amount_paid:
+          example: "15000.00"
+        net_payable_amount:
           type: string
-          example: '3.20'
+          example: "135000.00"
         currency_code:
           type: string
-          example: USD
-        settlement_amount:
-          type: string
-          example: '51200.00'
-        settlement_currency:
-          type: string
+          default: IDR
           example: IDR
-        points_used:
+        points_burned:
           type: integer
-          example: 0
-        points_discount:
-          type: string
-          example: '0.00'
-        payment_method:
-          type: string
-          example: qris
-        qris_payload:
-          type: string
-        va_number:
-          type: string
-        bank_code:
-          type: string
-        payment_status:
-          type: string
-          example: pending
+          example: 150
+        payment_method_type:
+          $ref: '#/components/schemas/PaymentMethodType'
+        payment_details:
+          $ref: '#/components/schemas/PaymentDetails'
         expired_at:
           type: string
           format: date-time
+        created_at:
+          type: string
+          format: date-time
 
-    VirtualPet:
+    PaymentDetails:
       type: object
+      properties:
+        payment_url:
+          type: string
+          nullable: true
+        qr_code_string:
+          type: string
+          nullable: true
+        va_number:
+          type: string
+          nullable: true
+        bank_code:
+          $ref: '#/components/schemas/BankCode'
+
+    DonationDetail:
+      type: object
+      required:
+        - id
+        - donation_type
+        - status
+        - gross_amount
+        - net_payable_amount
+        - currency_code
+        - points_burned
+        - payment_method_type
+        - is_anonymous
+        - created_at
       properties:
         id:
           type: string
           format: uuid
-        pet_name:
+        donation_type:
+          $ref: '#/components/schemas/DonationType'
+        status:
+          $ref: '#/components/schemas/DonationStatus'
+        gross_amount:
+          type: string
+          example: "150000.00"
+        net_payable_amount:
+          type: string
+          example: "135000.00"
+        currency_code:
+          type: string
+          default: IDR
+        points_burned:
+          type: integer
+        payment_method_type:
+          $ref: '#/components/schemas/PaymentMethodType'
+        is_anonymous:
+          type: boolean
+        payment_details:
+          $ref: '#/components/schemas/PaymentDetails'
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        expired_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedDonations:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DonationDetail'
+        next_cursor:
+          type: string
+          nullable: true
+
+    VirtualPet:
+      type: object
+      required:
+        - id
+        - name
+        - species_type
+        - growth_stage
+        - level
+        - experience_points
+        - health_percent
+        - is_primary
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
           type: string
           example: Acep
-        pet_species:
+        species_type:
           type: string
-          example: turtle
-        coral_type:
-          type: string
-          example: Acropora
+          example: green_sea_turtle
         growth_stage:
-          type: string
-          example: hatchling
-        health_percent:
-          type: integer
-          example: 100
+          $ref: '#/components/schemas/PetGrowthStage'
         level:
           type: integer
-          example: 1
+          example: 3
         experience_points:
           type: integer
-          example: 35
+          example: 450
+        health_percent:
+          type: integer
+          example: 85
         is_primary:
           type: boolean
           example: true
+        created_at:
+          type: string
+          format: date-time
 
-    AdoptPetRequest:
+    CreatePetRequest:
       type: object
       required:
-        - pet_name
-        - pet_species
-        - coral_type
+        - name
+        - species_type
       properties:
-        pet_name:
+        name:
           type: string
           example: Acep
-        pet_species:
+        species_type:
           type: string
-          example: turtle
-        coral_type:
+          example: green_sea_turtle
+
+    PetInteractionRequest:
+      type: object
+      required:
+        - interaction_type
+      properties:
+        interaction_type:
           type: string
-          example: Acropora
-        fragment_id:
+          enum: [feed, clean, pet]
+          example: feed
+
+    PetInteractionResponse:
+      type: object
+      required:
+        - pet_id
+        - interaction_type
+        - health_percent
+        - experience_points
+        - level
+      properties:
+        pet_id:
           type: string
           format: uuid
-        make_primary:
-          type: boolean
-          default: false
+        interaction_type:
+          type: string
+        health_percent:
+          type: integer
+          example: 100
+        experience_points:
+          type: integer
+          example: 480
+        level:
+          type: integer
+          example: 3
 
     EcoMission:
       type: object
+      required:
+        - id
+        - title
+        - description
+        - points_reward
+        - pet_xp_reward
+        - category
       properties:
         id:
           type: string
           format: uuid
         title:
           type: string
-          example: Reusable Tumbler Snap
+          example: Reusable Water Bottle Refill
         description:
           type: string
-        category:
-          type: string
-          example: lifestyle
-        difficulty:
-          type: string
-          example: easy
+          example: Take a clear photo refilling your reusable bottle instead of single-use plastic.
         points_reward:
           type: integer
           example: 50
-        xp_reward:
+        pet_xp_reward:
           type: integer
-          example: 25
-        requires_camera_proof:
-          type: boolean
-          example: true
+          example: 75
+        category:
+          type: string
+          example: waste_reduction
 
-    MissionSubmissionResult:
+    MissionSubmissionRequest:
       type: object
+      required:
+        - proof_object_key
+      properties:
+        proof_object_key:
+          type: string
+          description: S3 object key obtained via /v1/app/uploads/presign
+          example: mission_proofs/01a1d9e4-b3c4-7e54-8795-192296827d75.jpg
+
+    MissionSubmissionReceipt:
+      type: object
+      required:
+        - submission_id
+        - status
+        - message
+        - created_at
       properties:
         submission_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/SubmissionStatus'
+        message:
+          type: string
+          example: Proof photo received. Computer vision verification in progress.
+        created_at:
+          type: string
+          format: date-time
+
+    MissionSubmissionDetail:
+      type: object
+      required:
+        - id
+        - mission_id
+        - status
+        - created_at
+      properties:
+        id:
           type: string
           format: uuid
         mission_id:
           type: string
           format: uuid
         status:
-          type: string
-          enum: [verified, rejected, pending]
-          example: verified
-        awarded_points:
+          $ref: '#/components/schemas/SubmissionStatus'
+        ai_confidence_score:
+          type: number
+          nullable: true
+          example: 0.94
+        points_awarded:
           type: integer
+          nullable: true
           example: 50
-        awarded_xp:
-          type: integer
-          example: 25
-        current_streak:
-          type: integer
-          example: 1
         verified_at:
           type: string
           format: date-time
-        rejection_notes:
+          nullable: true
+        created_at:
           type: string
+          format: date-time
 
     UserStreak:
       type: object
+      required:
+        - current_streak
+        - longest_streak
+        - is_freeze_active
+        - freeze_count
       properties:
-        user_id:
-          type: string
-          format: uuid
         current_streak:
           type: integer
-          example: 3
+          example: 7
         longest_streak:
           type: integer
-          example: 7
-        last_streak_date:
+          example: 14
+        last_activity_date:
           type: string
           format: date
-          example: '2026-11-14'
+          nullable: true
+          example: "2026-11-14"
+        is_freeze_active:
+          type: boolean
+          example: false
+        freeze_count:
+          type: integer
+          description: Available Streak Freeze items in inventory protecting against missed days
+          example: 2
+
+    LeaderboardResponse:
+      type: object
+      required:
+        - rankings
+      properties:
+        rankings:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeaderboardEntry'
+        next_cursor:
+          type: string
+          nullable: true
 
     LeaderboardEntry:
       type: object
+      required:
+        - rank
+        - user_id
+        - display_name
+        - total_donations_idr
+        - total_units_adopted
+        - is_anonymous
+      properties:
+        rank:
+          type: integer
+          example: 1
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+          example: Maya Ocean Guardian
+        avatar_url:
+          type: string
+          nullable: true
+        total_donations_idr:
+          type: string
+          example: "7500000.00"
+        total_units_adopted:
+          type: integer
+          example: 50
+        is_anonymous:
+          type: boolean
+          example: false
+
+    DigitalProduct:
+      type: object
+      required:
+        - id
+        - sku
+        - name
+        - description
+        - category
+        - price_points
+        - price_idr
       properties:
         id:
           type: string
           format: uuid
-        full_name:
+        sku:
           type: string
-          example: Budi Pratama
-        avatar_url:
+          example: STREAK_FREEZE_1X
+        name:
           type: string
-        points_balance:
+          example: Streak Freeze Shield
+        description:
+          type: string
+          example: Automatically protects your daily streak when a day is missed.
+        category:
+          type: string
+          enum: [cosmetic, pet_skin, streak_protection, badge]
+          example: streak_protection
+        price_points:
           type: integer
-          example: 450
-        rank_position:
+          example: 100
+        price_idr:
+          type: string
+          example: "15000.00"
+        image_url:
+          type: string
+          nullable: true
+
+    BuyProductRequest:
+      type: object
+      required:
+        - product_id
+      properties:
+        product_id:
+          type: string
+          format: uuid
+
+    BuyProductResponse:
+      type: object
+      required:
+        - inventory_id
+        - product_sku
+        - remaining_points_balance
+      properties:
+        inventory_id:
+          type: string
+          format: uuid
+        product_sku:
+          type: string
+          example: STREAK_FREEZE_1X
+        remaining_points_balance:
+          type: integer
+          example: 150
+
+    InventoryItem:
+      type: object
+      required:
+        - id
+        - product_id
+        - sku
+        - name
+        - category
+        - quantity
+        - acquired_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+          example: STREAK_FREEZE_1X
+        name:
+          type: string
+          example: Streak Freeze Shield
+        category:
+          type: string
+          example: streak_protection
+        quantity:
           type: integer
           example: 1
-
-    HealthResponse:
-      type: object
-      required:
-        - status
-        - app
-        - uptime
-        - timestamp
-        - services
-      properties:
-        status:
-          type: string
-          enum: [ok, degraded]
-          example: ok
-        app:
-          type: string
-          example: BioVerse Backend
-        uptime:
-          type: string
-          example: 45m20s
-        timestamp:
+        acquired_at:
           type: string
           format: date-time
-          example: '2026-11-14T15:00:00Z'
-        services:
-          type: object
-          additionalProperties:
-            type: string
-          example:
-            database: connected
 
-    ProblemDetails:
+    SubscriptionPlan:
       type: object
       required:
-        - type
-        - title
-        - status
-        - detail
-        - code
+        - id
+        - name
+        - billing_interval
+        - price_idr
+        - unit_quantity
+        - benefits
       properties:
-        type:
+        id:
           type: string
-          format: uri
-          example: about:blank
-        title:
+          format: uuid
+        name:
           type: string
-          example: Bad Request
-        status:
+          example: Reef Guardian Monthly
+        billing_interval:
+          type: string
+          enum: [monthly, yearly]
+          example: monthly
+        price_idr:
+          type: string
+          example: "75000.00"
+        unit_quantity:
           type: integer
-          example: 400
-        detail:
-          type: string
-          example: Invalid request parameters provided.
-        instance:
-          type: string
-          example: /v1/app/auth/register
-        code:
-          type: string
-          example: BAD_REQUEST
-        errors:
-          type: object
-          additionalProperties:
+          example: 1
+        benefits:
+          type: array
+          items:
             type: string
           example:
-            email: Must be a valid email address.
+            - Monthly photographic monitoring
+            - Continuous Bio-Shield XP boost
+            - Exclusive Reef Supporter badge
+
+    CreateSubscriptionRequest:
+      type: object
+      required:
+        - plan_id
+        - project_id
+        - unit_quantity
+        - payment_method_type
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        unit_quantity:
+          type: integer
+          minimum: 1
+          default: 1
+        payment_method_type:
+          type: string
+          enum: [virtual_account, card, ewallet]
+          example: card
+
+    SubscriptionDetail:
+      type: object
+      required:
+        - id
+        - status
+        - plan_name
+        - price_idr
+        - billing_interval
+        - next_billing_date
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, paused, cancelled, past_due]
+          example: active
+        plan_name:
+          type: string
+          example: Reef Guardian Monthly
+        price_idr:
+          type: string
+          example: "75000.00"
+        billing_interval:
+          type: string
+          example: monthly
+        authorization_url:
+          type: string
+          nullable: true
+          example: https://checkout.xendit.co/v2/sub_12345
+        next_billing_date:
+          type: string
+          format: date
+          example: "2026-12-14"
+        created_at:
+          type: string
+          format: date-time
+
+    CreateOperatorRequest:
+      type: object
+      required:
+        - user_id
+        - national_id_nik
+        - bank_account_number
+        - bank_name
+        - bank_account_holder_name
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        national_id_nik:
+          type: string
+          minLength: 16
+          maxLength: 16
+          example: "3201012345678901"
+        bank_account_number:
+          type: string
+          example: "1234567890"
+        bank_name:
+          type: string
+          example: BCA
+        bank_account_holder_name:
+          type: string
+          example: I Wayan Samudera
+
+    OperatorDetail:
+      type: object
+      required:
+        - id
+        - user_id
+        - verification_status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        verification_status:
+          type: string
+          enum: [pending, verified, rejected]
+          example: verified
+        created_at:
+          type: string
+          format: date-time
+
+    CreateWorkLogRequest:
+      type: object
+      required:
+        - operator_id
+        - project_id
+        - units_planted
+      properties:
+        operator_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        units_planted:
+          type: integer
+          minimum: 1
+          example: 15
+
+    WorkLogDetail:
+      type: object
+      required:
+        - id
+        - operator_id
+        - project_id
+        - units_planted
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        operator_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        units_planted:
+          type: integer
+          example: 15
+        status:
+          type: string
+          enum: [submitted, verified, rejected]
+          example: verified
+        created_at:
+          type: string
+          format: date-time
+
+    SubmitMediaRequest:
+      type: object
+      required:
+        - work_log_id
+        - fragment_id
+        - milestone_month
+        - media_object_key
+        - health_status
+        - growth_cm
+      properties:
+        work_log_id:
+          type: string
+          format: uuid
+        fragment_id:
+          type: string
+          format: uuid
+        milestone_month:
+          type: integer
+          enum: [1, 3, 6]
+          example: 1
+        media_object_key:
+          type: string
+          example: field_evidence/fragment_001_month1.jpg
+        health_status:
+          $ref: '#/components/schemas/CoralHealthStatus'
+        growth_cm:
+          type: number
+          example: 1.45
+
+    CreatePayoutBatchRequest:
+      type: object
+      required:
+        - work_log_ids
+      properties:
+        work_log_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    PayoutBatchDetail:
+      type: object
+      required:
+        - id
+        - total_gross_idr
+        - total_fee_idr
+        - total_net_disbursed_idr
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        total_gross_idr:
+          type: string
+          example: "300000.00"
+        total_fee_idr:
+          type: string
+          example: "7500.00"
+        total_net_disbursed_idr:
+          type: string
+          example: "292500.00"
+        status:
+          type: string
+          enum: [pending, disbursed, failed]
+          example: disbursed
+        created_at:
+          type: string
+          format: date-time
+
+    CreateCompanyRequest:
+      type: object
+      required:
+        - name
+        - legal_tax_id
+      properties:
+        name:
+          type: string
+          example: PT Samudera Lestari TBK
+        legal_tax_id:
+          type: string
+          example: 01.234.567.8-901.000
+        industry:
+          type: string
+          example: maritime_transport
+
+    B2bCompanyDetail:
+      type: object
+      required:
+        - id
+        - name
+        - legal_tax_id
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        legal_tax_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateContractRequest:
+      type: object
+      required:
+        - contract_number
+        - package_type
+        - total_units_sponsored
+      properties:
+        contract_number:
+          type: string
+          example: CTR-SL-2026-001
+        package_type:
+          type: string
+          enum: [corporate_starter, business_growth, enterprise_suite]
+          example: enterprise_suite
+        total_units_sponsored:
+          type: integer
+          example: 500
+
+    B2bContractDetail:
+      type: object
+      required:
+        - contract_id
+        - quota_id
+        - total_units_sponsored
+        - remaining_units
+        - created_at
+      properties:
+        contract_id:
+          type: string
+          format: uuid
+        quota_id:
+          type: string
+          format: uuid
+        total_units_sponsored:
+          type: integer
+          example: 500
+        remaining_units:
+          type: integer
+          example: 500
+        created_at:
+          type: string
+          format: date-time
+
+    RecordEsgMetricRequest:
+      type: object
+      required:
+        - reporting_period
+        - metric_code
+        - metric_value
+      properties:
+        reporting_period:
+          type: string
+          example: 2026-Q4
+        metric_code:
+          type: string
+          example: GRI_101_SURVIVAL_RATE
+        metric_value:
+          type: number
+          example: 94.5
+
+    GenerateEsgReportRequest:
+      type: object
+      required:
+        - reporting_year
+        - format
+      properties:
+        reporting_year:
+          type: integer
+          example: 2026
+        format:
+          type: string
+          enum: [pdf, csv]
+          example: pdf
+
+    EsgReportDetail:
+      type: object
+      required:
+        - id
+        - company_id
+        - reporting_year
+        - compliance_standard
+        - compliance_status
+        - download_url
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        reporting_year:
+          type: integer
+          example: 2026
+        compliance_standard:
+          type: string
+          example: POJK 51/2017 & GRI 101
+        compliance_status:
+          type: string
+          enum: [compliant, at_risk, non_compliant]
+          example: compliant
+        download_url:
+          type: string
+          example: https://storage.bioverse.id/esg_reports/report_2026.pdf
+        created_at:
+          type: string
+          format: date-time
+
+    XenditWebhookPayload:
+      type: object
+      required:
+        - id
+        - external_id
+        - status
+        - amount
+      properties:
+        id:
+          type: string
+          example: 6f8d3c1a-7b2e-4f5a-9c8d-1e2f3a4b5c6d
+        external_id:
+          type: string
+          example: donation_01a1d9e4-b4a8-7957-b113-2fbd368c943f
+        status:
+          type: string
+          example: PAID
+        amount:
+          type: number
+          example: 135000
+        payment_method:
+          type: string
+          example: QRIS
+        paid_at:
+          type: string
+          format: date-time
