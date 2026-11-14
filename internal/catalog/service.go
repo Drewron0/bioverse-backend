@@ -2,9 +2,27 @@ package catalog
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"time"
 
+	"github.com/Drewron01/bioverse-backend/internal/platform/database"
 	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var (
+	// ErrProductNotFound indicates digital product not found.
+	ErrProductNotFound = errors.New("digital product not found")
+	// ErrInsufficientPoints indicates user does not have enough points.
+	ErrInsufficientPoints = errors.New("insufficient points balance to purchase product")
+	// ErrItemNotInInventory indicates user does not own item or quantity is zero.
+	ErrItemNotInInventory = errors.New("item not in user inventory or insufficient quantity")
+	// ErrPlanNotFound indicates subscription plan not found.
+	ErrPlanNotFound = errors.New("subscription plan not found")
 )
 
 // Service provides business logic for the digital item shop and subscription catalog.
@@ -35,4 +53,180 @@ func (s *Service) ListSubscriptionPlans(ctx context.Context, currencyCode string
 		currencyCode = "USD"
 	}
 	return s.store.ListActiveSubscriptionPlans(ctx, currencyCode)
+}
+
+// BuyProductWithPoints handles shop item purchase with user points.
+func (s *Service) BuyProductWithPoints(ctx context.Context, userID, productID uuid.UUID, quantity int32) (*store.UserDigitalInventories, error) {
+	if quantity <= 0 {
+		quantity = 1
+	}
+
+	prod, err := s.store.GetDigitalProductByID(ctx, productID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProductNotFound
+		}
+		return nil, fmt.Errorf("failed to get product: %w", err)
+	}
+
+	totalPoints := int64(prod.PricePoints) * int64(quantity)
+
+	var inv store.UserDigitalInventories
+	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+
+		// 1. Lock and deduct points
+		lockedUser, err := txStore.LockUserPoints(ctx, store.LockUserPointsParams{
+			ID:                  userID,
+			LockedPointsBalance: totalPoints,
+		})
+		if err != nil {
+			return ErrInsufficientPoints
+		}
+
+		spentUser, err := txStore.SpendUserPoints(ctx, store.SpendUserPointsParams{
+			ID:            userID,
+			PointsBalance: totalPoints,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to spend user points: %w", err)
+		}
+
+		// 2. Upsert into inventory
+		invID, _ := uuid.NewV7()
+		createdInv, err := txStore.UpsertUserInventoryItem(ctx, store.UpsertUserInventoryItemParams{
+			ID:        invID,
+			UserID:    userID,
+			ProductID: productID,
+			Quantity:  quantity,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update user inventory: %w", err)
+		}
+
+		// 3. Record point ledger entry
+		ledgerID, _ := uuid.NewV7()
+		_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
+			ID:              ledgerID,
+			UserID:          userID,
+			TransactionType: store.PointTxTypeSpendShop,
+			Amount:          totalPoints,
+			BalanceAfter:    spentUser.PointsBalance,
+			ReferenceType:   "shop_purchase",
+			ReferenceID:     invID,
+			Description:     fmt.Sprintf("Purchased %dx %s", quantity, prod.Name),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to record point ledger: %w", err)
+		}
+
+		inv = createdInv
+		_ = lockedUser
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &inv, nil
+}
+
+// ListUserInventory retrieves items owned by user.
+func (s *Service) ListUserInventory(ctx context.Context, userID uuid.UUID) ([]store.ListUserInventoryRow, error) {
+	return s.store.ListUserInventory(ctx, userID)
+}
+
+// ConsumeStreakFreeze uses one Streak Freeze item from user inventory to protect streak.
+func (s *Service) ConsumeStreakFreeze(ctx context.Context, userID uuid.UUID) error {
+	return database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+
+		prod, err := txStore.GetDigitalProductBySKU(ctx, store.GetDigitalProductBySKUParams{
+			SkuCode:      "STREAK_FREEZE_1X",
+			CurrencyCode: "USD",
+		})
+		if err != nil {
+			return fmt.Errorf("streak freeze product missing: %w", err)
+		}
+
+		_, err = txStore.DecrementUserInventoryItem(ctx, store.DecrementUserInventoryItemParams{
+			UserID:    userID,
+			ProductID: prod.ID,
+			Quantity:  1,
+		})
+		if err != nil {
+			return ErrItemNotInInventory
+		}
+
+		today := time.Now().UTC()
+		todayDate := pgtype.Date{
+			Time:  time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC),
+			Valid: true,
+		}
+
+		streak, err := txStore.GetUserStreakByUserID(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("failed to get user streak: %w", err)
+		}
+
+		_, err = txStore.UpdateUserStreak(ctx, store.UpdateUserStreakParams{
+			UserID:             userID,
+			CurrentStreak:      streak.CurrentStreak,
+			LongestStreak:      streak.LongestStreak,
+			LastStreakDate:     streak.LastStreakDate,
+			LastFreezeUsedDate: todayDate,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to record freeze used date: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// SubscribePlan creates a recurring maintenance subscription.
+func (s *Service) SubscribePlan(ctx context.Context, userID, planID uuid.UUID, paymentMethod store.PaymentMethodType) (*store.DonationSubscriptions, error) {
+	plan, err := s.store.GetSubscriptionPlanByID(ctx, store.GetSubscriptionPlanByIDParams{
+		ID:           planID,
+		CurrencyCode: "USD",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPlanNotFound
+		}
+		return nil, fmt.Errorf("failed to get subscription plan: %w", err)
+	}
+
+	subID, _ := uuid.NewV7()
+	nextBilling := time.Now().UTC().AddDate(0, 1, 0)
+	nextBillingDate := pgtype.Date{
+		Time:  time.Date(nextBilling.Year(), nextBilling.Month(), nextBilling.Day(), 0, 0, 0, 0, time.UTC),
+		Valid: true,
+	}
+
+	sub, err := s.store.CreateDonationSubscription(ctx, store.CreateDonationSubscriptionParams{
+		ID:              subID,
+		UserID:          userID,
+		PlanID:          pgtype.UUID{Bytes: planID, Valid: true},
+		ProjectID:       pgtype.UUID{Valid: false},
+		Frequency:       plan.BillingInterval,
+		DurationMonths:  plan.DurationMonths,
+		UnitQuantity:    1,
+		CurrencyCode:    "USD",
+		AmountPerCycle:  plan.PriceMoney,
+		PaymentMethod:   paymentMethod,
+		PaymentProvider: "xendit",
+		Status:          store.SubscriptionStatusActive,
+		NextBillingDate: nextBillingDate,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create subscription: %w", err)
+	}
+
+	return &sub, nil
+}
+
+// ListUserSubscriptions returns user subscriptions.
+func (s *Service) ListUserSubscriptions(ctx context.Context, userID uuid.UUID) ([]store.ListUserSubscriptionsRow, error) {
+	return s.store.ListUserSubscriptions(ctx, userID)
 }
