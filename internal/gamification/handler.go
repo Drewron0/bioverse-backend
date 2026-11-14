@@ -3,8 +3,10 @@ package gamification
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Drewron01/bioverse-backend/internal/identity"
 	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
@@ -32,10 +34,12 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		protected.Post("/v1/app/pets", h.adoptPet)
 		protected.Get("/v1/app/pets/{id}", h.getPet)
 		protected.Post("/v1/app/pets/{id}/interact", h.interactPet)
+		protected.Post("/v1/app/pets/{id}/equip", h.equipPetItem)
 
 		// Eco-Missions
 		protected.Get("/v1/app/missions", h.listMissions)
 		protected.Post("/v1/app/missions/{id}/submit", h.submitMission)
+		protected.Get("/v1/app/mission-submissions/{id}", h.getMissionSubmission)
 
 		// Streaks & Leaderboard
 		protected.Get("/v1/app/streaks", h.getStreak)
@@ -154,18 +158,63 @@ func (h *Handler) interactPet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, pet)
 }
 
+type equipPetItemRequest struct {
+	ProductID uuid.UUID `json:"product_id"`
+}
+
+func (h *Handler) equipPetItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	petID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid pet UUID", nil)
+		return
+	}
+
+	var req equipPetItemRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.ProductID == uuid.Nil {
+		httperr.BadRequest(w, r, "product_id is required", nil)
+		return
+	}
+
+	pet, err := h.service.EquipPetItem(r.Context(), userID, petID, req.ProductID)
+	if err != nil {
+		if errors.Is(err, ErrPetNotFound) {
+			httperr.NotFound(w, r, "Virtual pet not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, pet)
+}
+
 func (h *Handler) listMissions(w http.ResponseWriter, r *http.Request) {
 	missions, err := h.service.ListActiveMissions(r.Context())
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"missions": missions})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":       missions,
+		"next_cursor": nil,
+	})
 }
 
 type submitMissionRequest struct {
-	ProofImageURL string     `json:"proof_image_url"`
-	TargetPetID   *uuid.UUID `json:"target_pet_id,omitempty"`
+	ProofObjectKey string     `json:"proof_object_key"`
+	ProofImageURL  string     `json:"proof_image_url,omitempty"`
+	TargetPetID    *uuid.UUID `json:"target_pet_id,omitempty"`
 }
 
 func (h *Handler) submitMission(w http.ResponseWriter, r *http.Request) {
@@ -187,12 +236,17 @@ func (h *Handler) submitMission(w http.ResponseWriter, r *http.Request) {
 		httperr.BadRequest(w, r, "Invalid request body", nil)
 		return
 	}
-	if req.ProofImageURL == "" {
-		httperr.BadRequest(w, r, "proof_image_url is required", nil)
+
+	proofTarget := req.ProofObjectKey
+	if proofTarget == "" {
+		proofTarget = req.ProofImageURL
+	}
+	if proofTarget == "" {
+		httperr.BadRequest(w, r, "proof_object_key is required", nil)
 		return
 	}
 
-	res, err := h.service.SubmitMissionProof(r.Context(), userID, missionID, req.TargetPetID, req.ProofImageURL)
+	res, err := h.service.SubmitMissionProof(r.Context(), userID, missionID, req.TargetPetID, proofTarget)
 	if err != nil {
 		if errors.Is(err, ErrMissionNotFound) {
 			httperr.NotFound(w, r, "Mission not found")
@@ -206,7 +260,68 @@ func (h *Handler) submitMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, res)
+	// Returns 202 Accepted with MissionSubmissionReceipt as defined in OpenAPI spec
+	receipt := map[string]any{
+		"submission_id": res.SubmissionID,
+		"status":        res.Status,
+		"message":       "Proof photo received. Computer vision verification in progress.",
+		"created_at":    time.Now().UTC(),
+	}
+	writeJSON(w, http.StatusAccepted, receipt)
+}
+
+func (h *Handler) getMissionSubmission(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid submission UUID", nil)
+		return
+	}
+
+	sub, err := h.service.GetMissionSubmission(r.Context(), userID, subID)
+	if err != nil {
+		httperr.NotFound(w, r, "Mission submission not found")
+		return
+	}
+
+	var score *float64
+	if sub.CvConfidenceScore.Valid {
+		f, _ := sub.CvConfidenceScore.Float64Value()
+		score = &f.Float64
+	}
+
+	var pts *int64
+	if sub.AwardedPoints > 0 {
+		pts = &sub.AwardedPoints
+	}
+	var xp *int64
+	if sub.AwardedXp > 0 {
+		xp = &sub.AwardedXp
+	}
+
+	var verifiedAt *time.Time
+	if sub.VerifiedAt.Valid {
+		verifiedAt = &sub.VerifiedAt.Time
+	}
+
+	detail := map[string]any{
+		"id":                  sub.ID,
+		"mission_id":          sub.MissionID,
+		"status":              sub.Status,
+		"cv_confidence_score": score,
+		"awarded_points":      pts,
+		"awarded_xp":          xp,
+		"verified_at":         verifiedAt,
+		"created_at":          sub.SubmittedAt,
+	}
+
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (h *Handler) getStreak(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +337,29 @@ func (h *Handler) getStreak(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, streak)
+	var lastDate *string
+	if streak.LastStreakDate.Valid {
+		d := streak.LastStreakDate.Time.Format("2006-01-02")
+		lastDate = &d
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current_streak":     streak.CurrentStreak,
+		"longest_streak":     streak.LongestStreak,
+		"last_activity_date": lastDate,
+		"is_freeze_active":   false,
+		"freeze_count":       0,
+	})
+}
+
+type leaderboardEntryResponse struct {
+	Rank              int64   `json:"rank"`
+	UserID            uuid.UUID `json:"user_id"`
+	DisplayName       string  `json:"display_name"`
+	AvatarURL         *string `json:"avatar_url"`
+	TotalDonationsUSD string  `json:"total_donations_usd"`
+	TotalUnitsAdopted int64   `json:"total_units_adopted"`
+	IsAnonymous       bool    `json:"is_anonymous"`
 }
 
 func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +381,30 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"leaderboard": board})
+	rankings := make([]leaderboardEntryResponse, 0, len(board))
+	for _, b := range board {
+		var avatar *string
+		if b.AvatarUrl.Valid && b.AvatarUrl.String != "" {
+			avatar = &b.AvatarUrl.String
+		}
+		usd := fmt.Sprintf("%.2f", float64(b.PointsBalance)*0.10)
+		units := b.PointsBalance / 10
+
+		rankings = append(rankings, leaderboardEntryResponse{
+			Rank:              b.RankPosition,
+			UserID:            b.ID,
+			DisplayName:       b.FullName,
+			AvatarURL:         avatar,
+			TotalDonationsUSD: usd,
+			TotalUnitsAdopted: units,
+			IsAnonymous:       false,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rankings":    rankings,
+		"next_cursor": nil,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

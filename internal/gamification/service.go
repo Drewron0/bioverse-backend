@@ -458,6 +458,37 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 	return &result, nil
 }
 
+// EquipPetItem assigns a cosmetic product to the pet.
+func (s *Service) EquipPetItem(ctx context.Context, userID, petID, productID uuid.UUID) (*store.VirtualPets, error) {
+	pet, err := s.store.EquipVirtualPetProduct(ctx, store.EquipVirtualPetProductParams{
+		ID:                petID,
+		UserID:            userID,
+		EquippedProductID: pgtype.UUID{Bytes: productID, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPetNotFound
+		}
+		return nil, fmt.Errorf("failed to equip item on pet: %w", err)
+	}
+	return &pet, nil
+}
+
+// GetMissionSubmission retrieves a submission by ID for the given user.
+func (s *Service) GetMissionSubmission(ctx context.Context, userID, submissionID uuid.UUID) (*store.UserMissionSubmissions, error) {
+	sub, err := s.store.GetMissionSubmissionByID(ctx, store.GetMissionSubmissionByIDParams{
+		ID:     submissionID,
+		UserID: userID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("mission submission not found")
+		}
+		return nil, fmt.Errorf("failed to get mission submission: %w", err)
+	}
+	return &sub, nil
+}
+
 // GetUserStreak retrieves the current streak state for a user.
 func (s *Service) GetUserStreak(ctx context.Context, userID uuid.UUID) (*store.UserStreaks, error) {
 	streak, err := s.store.GetUserStreakByUserID(ctx, userID)
