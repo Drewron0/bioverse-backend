@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Drewron01/bioverse-backend/internal/identity"
 	"github.com/Drewron01/bioverse-backend/internal/platform/config"
 	"github.com/Drewron01/bioverse-backend/internal/platform/database"
 	"github.com/Drewron01/bioverse-backend/internal/platform/middleware"
+	"github.com/Drewron01/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -141,6 +143,14 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 	r.Route("/v1", func(v1 chi.Router) {
 		v1.Get("/health", healthCheckHandler(db))
 	})
+
+	if db != nil {
+		queries := store.New(db)
+		identityService := identity.NewService(db, queries, cfg)
+		identityHandler := identity.NewHandler(identityService)
+		authMiddleware := identity.AuthMiddleware(cfg.Auth.JWTSecret)
+		identityHandler.RegisterRoutes(r, authMiddleware)
+	}
 
 	return r
 }
