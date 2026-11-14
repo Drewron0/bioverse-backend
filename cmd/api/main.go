@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Drewron01/bioverse-backend/internal/b2b"
 	"github.com/Drewron01/bioverse-backend/internal/catalog"
 	"github.com/Drewron01/bioverse-backend/internal/conservation"
 	"github.com/Drewron01/bioverse-backend/internal/donation"
+	"github.com/Drewron01/bioverse-backend/internal/fieldops"
 	"github.com/Drewron01/bioverse-backend/internal/gamification"
 	"github.com/Drewron01/bioverse-backend/internal/identity"
 	"github.com/Drewron01/bioverse-backend/internal/platform/config"
@@ -165,7 +167,7 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 
 		catalogService := catalog.NewService(db, queries)
 		catalogHandler := catalog.NewHandler(catalogService)
-		catalogHandler.RegisterRoutes(r)
+		catalogHandler.RegisterRoutes(r, authMiddleware)
 
 		xenditGateway := payment.NewXenditClient(cfg.Payment.XenditSecretKey, log)
 		_ = email.NewResendClient(cfg.Email.ResendAPIKey, cfg.Email.FromEmail, log)
@@ -178,6 +180,14 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		gamificationService := gamification.NewService(db, queries, nil)
 		gamificationHandler := gamification.NewHandler(gamificationService)
 		gamificationHandler.RegisterRoutes(r, authMiddleware)
+
+		fieldopsService := fieldops.NewService(db, queries, cfg.Auth.AppEncryptionKey, cfg.Auth.HMACSecret)
+		fieldopsHandler := fieldops.NewHandler(fieldopsService)
+		fieldopsHandler.RegisterRoutes(r, authMiddleware)
+
+		b2bService := b2b.NewService(db, queries)
+		b2bHandler := b2b.NewHandler(b2bService)
+		b2bHandler.RegisterRoutes(r, authMiddleware)
 	}
 
 	return r
