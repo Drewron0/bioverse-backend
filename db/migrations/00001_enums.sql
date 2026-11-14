@@ -2,7 +2,7 @@
 -- This file is BOTH the enum reference document and the first migration.
 -- Rules:
 --   * Enum = stable state machines / closed sets. Add a value later with
---     `ALTER TYPE x ADD VALUE 'y';` in its own migration marked `-- +goose NO TRANSACTION`.
+--     `ALTER TYPE x ADD VALUE 'y';` in its own migration marked with NO TRANSACTION directive.
 --   * Values are never renamed or removed in production; deprecate in code instead.
 --   * NOTE: `money_payment_method`, `incident_status`, `physical_health_status`, `verification_status`
 --     etc. in the ERD are COLUMN names, not types. The type is the first token in each ERD line.
