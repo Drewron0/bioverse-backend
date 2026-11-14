@@ -7,7 +7,22 @@ import (
 
 	"github.com/Drewron01/bioverse-backend/internal/platform/crypto"
 	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/google/uuid"
 )
+
+type contextKey string
+
+const (
+	UserIDContextKey    contextKey = "user_id"
+	UserEmailContextKey contextKey = "user_email"
+	AdminRoleContextKey contextKey = "admin_role"
+)
+
+// GetUserIDFromContext retrieves the authenticated user's UUID from the context.
+func GetUserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	val, ok := ctx.Value(UserIDContextKey).(uuid.UUID)
+	return val, ok
+}
 
 // AuthMiddleware creates an HTTP middleware that enforces JWT authentication.
 func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
