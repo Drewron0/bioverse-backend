@@ -15,8 +15,11 @@ type Config struct {
 	App      AppConfig
 	Database DatabaseConfig
 	Auth     AuthConfig
-	Storage  StorageConfig
-	Payment  PaymentConfig
+	Storage      StorageConfig
+	Payment      PaymentConfig
+	Email        EmailConfig
+	Notification NotificationConfig
+	OAuth        OAuthConfig
 }
 
 // AppConfig defines HTTP server and general application settings.
@@ -60,6 +63,22 @@ type StorageConfig struct {
 type PaymentConfig struct {
 	XenditSecretKey    string
 	XenditWebhookToken string
+}
+
+// EmailConfig defines transactional email settings.
+type EmailConfig struct {
+	ResendAPIKey string
+	FromEmail    string
+}
+
+// NotificationConfig defines push notification credentials.
+type NotificationConfig struct {
+	FCMCredentialsPath string
+}
+
+// OAuthConfig defines OAuth integration credentials.
+type OAuthConfig struct {
+	GoogleClientID string
 }
 
 // Load reads configuration from environment variables and an optional .env file.
@@ -147,6 +166,16 @@ func Load() (*Config, error) {
 		Payment: PaymentConfig{
 			XenditSecretKey:    getEnv("XENDIT_SECRET_KEY", ""),
 			XenditWebhookToken: getEnv("XENDIT_WEBHOOK_TOKEN", ""),
+		},
+		Email: EmailConfig{
+			ResendAPIKey: getEnv("RESEND_API_KEY", ""),
+			FromEmail:    getEnv("EMAIL_FROM", "onboarding@resend.dev"),
+		},
+		Notification: NotificationConfig{
+			FCMCredentialsPath: strings.Trim(getEnv("FCM_CREDENTIALS_JSON_PATH", ""), "\""),
+		},
+		OAuth: OAuthConfig{
+			GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
 		},
 	}
 
