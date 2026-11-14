@@ -1,0 +1,236 @@
+package fieldops
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+)
+
+// Handler serves HTTP endpoints for field operations and payouts.
+type Handler struct {
+	service *Service
+}
+
+// NewHandler constructs a fieldops HTTP handler.
+func NewHandler(svc *Service) *Handler {
+	return &Handler{service: svc}
+}
+
+// RegisterRoutes mounts fieldops endpoints.
+func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+	r.Group(func(protected chi.Router) {
+		protected.Use(authMiddleware)
+
+		protected.Post("/v1/app/fieldops/operators", h.handleRegisterOperator)
+		protected.Get("/v1/app/fieldops/operators/{id}", h.handleGetOperator)
+		protected.Post("/v1/app/fieldops/work-logs", h.handleRecordWorkLog)
+		protected.Post("/v1/app/fieldops/media", h.handleRecordMedia)
+		protected.Post("/v1/app/fieldops/payouts", h.handleCreatePayout)
+	})
+}
+
+type registerOperatorRequest struct {
+	ZoneID                uuid.UUID          `json:"zone_id"`
+	GroupID               *uuid.UUID         `json:"group_id,omitempty"`
+	FullName              string             `json:"full_name"`
+	PhoneNumber           string             `json:"phone_number"`
+	Email                 string             `json:"email"`
+	OperatorRole          store.OperatorRole `json:"operator_role"`
+	NIK                   string             `json:"nik"`
+	BankCode              string             `json:"bank_code"`
+	BankAccountNumber     string             `json:"bank_account_number"`
+	BankAccountHolder     string             `json:"bank_account_holder"`
+	RatePerPlantingIDR    decimal.Decimal    `json:"rate_per_planting_idr"`
+	RatePerMaintenanceIDR decimal.Decimal    `json:"rate_per_maintenance_idr"`
+}
+
+func (h *Handler) handleRegisterOperator(w http.ResponseWriter, r *http.Request) {
+	var req registerOperatorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.FullName == "" || req.NIK == "" || req.PhoneNumber == "" {
+		httperr.BadRequest(w, r, "full_name, nik, and phone_number are required", nil)
+		return
+	}
+
+	op, err := h.service.RegisterOperator(r.Context(), RegisterOperatorInput{
+		ZoneID:                req.ZoneID,
+		GroupID:               req.GroupID,
+		FullName:              req.FullName,
+		PhoneNumber:           req.PhoneNumber,
+		Email:                 req.Email,
+		OperatorRole:          req.OperatorRole,
+		NIK:                   req.NIK,
+		BankCode:              req.BankCode,
+		BankAccountNumber:     req.BankAccountNumber,
+		BankAccountHolder:     req.BankAccountHolder,
+		RatePerPlantingIDR:    req.RatePerPlantingIDR,
+		RatePerMaintenanceIDR: req.RatePerMaintenanceIDR,
+	})
+	if err != nil {
+		if errors.Is(err, ErrDuplicateNIK) {
+			httperr.Conflict(w, r, "Operator with this NIK already registered")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, op)
+}
+
+func (h *Handler) handleGetOperator(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	opID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid operator UUID", nil)
+		return
+	}
+
+	op, err := h.service.GetOperator(r.Context(), opID)
+	if err != nil {
+		if errors.Is(err, ErrOperatorNotFound) {
+			httperr.NotFound(w, r, "Field operator not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, op)
+}
+
+type recordWorkLogRequest struct {
+	OperatorID      uuid.UUID              `json:"operator_id"`
+	ProjectID       uuid.UUID              `json:"project_id"`
+	SpiderFrameID   *uuid.UUID             `json:"spider_frame_id,omitempty"`
+	CoralFragmentID *uuid.UUID             `json:"coral_fragment_id,omitempty"`
+	TaskType        store.OperatorTaskType `json:"task_type"`
+	UnitsCompleted  int32                  `json:"units_completed"`
+	FeeEarnedIDR    decimal.Decimal        `json:"fee_earned_idr"`
+	ProofImageURL   string                 `json:"proof_image_url"`
+}
+
+func (h *Handler) handleRecordWorkLog(w http.ResponseWriter, r *http.Request) {
+	var req recordWorkLogRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.OperatorID == uuid.Nil || req.ProjectID == uuid.Nil || req.ProofImageURL == "" {
+		httperr.BadRequest(w, r, "operator_id, project_id, and proof_image_url are required", nil)
+		return
+	}
+
+	log, err := h.service.RecordWorkLog(r.Context(), RecordWorkLogInput{
+		OperatorID:      req.OperatorID,
+		ProjectID:       req.ProjectID,
+		SpiderFrameID:   req.SpiderFrameID,
+		CoralFragmentID: req.CoralFragmentID,
+		TaskType:        req.TaskType,
+		UnitsCompleted:  req.UnitsCompleted,
+		FeeEarnedIDR:    req.FeeEarnedIDR,
+		ProofImageURL:   req.ProofImageURL,
+		WorkDate:        time.Now().UTC(),
+	})
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, log)
+}
+
+type recordMediaRequest struct {
+	ProjectID       uuid.UUID       `json:"project_id"`
+	SpiderFrameID   *uuid.UUID      `json:"spider_frame_id,omitempty"`
+	CoralFragmentID *uuid.UUID      `json:"coral_fragment_id,omitempty"`
+	MilestoneMonth  int32           `json:"milestone_month"`
+	MilestoneTitle  string          `json:"milestone_title"`
+	MediaURL        string          `json:"media_url"`
+	Latitude        decimal.Decimal `json:"latitude"`
+	Longitude       decimal.Decimal `json:"longitude"`
+	DepthMeters     decimal.Decimal `json:"depth_meters"`
+}
+
+func (h *Handler) handleRecordMedia(w http.ResponseWriter, r *http.Request) {
+	var req recordMediaRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	ev, err := h.service.RecordMediaEvidence(r.Context(), RecordMediaEvidenceInput{
+		ProjectID:       req.ProjectID,
+		SpiderFrameID:   req.SpiderFrameID,
+		CoralFragmentID: req.CoralFragmentID,
+		MilestoneMonth:  req.MilestoneMonth,
+		MilestoneTitle:  req.MilestoneTitle,
+		MediaURL:        req.MediaURL,
+		Latitude:        req.Latitude,
+		Longitude:       req.Longitude,
+		DepthMeters:     req.DepthMeters,
+		CapturedAt:      time.Now().UTC(),
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidMilestoneMonth) {
+			httperr.BadRequest(w, r, "milestone_month must be 1, 3, or 6", nil)
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ev)
+}
+
+type createPayoutRequest struct {
+	OperatorID       uuid.UUID       `json:"operator_id"`
+	PeriodStart      string          `json:"period_start"`
+	PeriodEnd        string          `json:"period_end"`
+	GrossAmountIDR   decimal.Decimal `json:"gross_amount_idr"`
+	UnitsPlanted     int32           `json:"units_planted"`
+	MaintenanceTasks int32           `json:"maintenance_tasks"`
+}
+
+func (h *Handler) handleCreatePayout(w http.ResponseWriter, r *http.Request) {
+	var req createPayoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	start, err := time.Parse("2006-01-02", req.PeriodStart)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid period_start format (YYYY-MM-DD)", nil)
+		return
+	}
+	end, err := time.Parse("2006-01-02", req.PeriodEnd)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid period_end format (YYYY-MM-DD)", nil)
+		return
+	}
+
+	payout, err := h.service.CreatePayout(r.Context(), req.OperatorID, start, end, req.GrossAmountIDR, req.UnitsPlanted, req.MaintenanceTasks)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, payout)
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
