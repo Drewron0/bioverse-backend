@@ -65,6 +65,8 @@ type PaymentConfig struct {
 // Load reads configuration from environment variables and an optional .env file.
 func Load() (*Config, error) {
 	_ = godotenv.Load()
+	_ = godotenv.Load("../.env")
+	_ = godotenv.Load("../../.env")
 
 	port, err := getEnvAsInt("PORT", 8080)
 	if err != nil {
