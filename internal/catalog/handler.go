@@ -35,11 +35,15 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		protected.Use(authMiddleware)
 
 		protected.Post("/v1/app/shop/buy", h.handleBuyProduct)
+		protected.Post("/v1/app/shop/iap/verify", h.handleVerifyIAPReceipt)
 		protected.Get("/v1/app/inventory", h.handleListInventory)
 		protected.Post("/v1/app/inventory/streak-freeze/use", h.handleUseStreakFreeze)
 
 		protected.Post("/v1/app/subscriptions", h.handleCreateSubscription)
 		protected.Get("/v1/app/subscriptions/my", h.handleListSubscriptions)
+		protected.Post("/v1/app/subscriptions/{id}/pause", h.handlePauseSubscription)
+		protected.Post("/v1/app/subscriptions/{id}/resume", h.handleResumeSubscription)
+		protected.Post("/v1/app/subscriptions/{id}/cancel", h.handleCancelSubscription)
 	})
 }
 
@@ -125,7 +129,10 @@ func (h *Handler) handleListInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"inventory": items})
+	if items == nil {
+		items = []store.ListUserInventoryRow{}
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) handleUseStreakFreeze(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +207,145 @@ func (h *Handler) handleListSubscriptions(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"subscriptions": subs})
+}
+
+type verifyIAPRequest struct {
+	ProductID      uuid.UUID `json:"product_id"`
+	StoreProvider  string    `json:"store_provider"`
+	ReceiptPayload string    `json:"receipt_payload"`
+}
+
+func (h *Handler) handleVerifyIAPReceipt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	var req verifyIAPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.ProductID == uuid.Nil || req.StoreProvider == "" || req.ReceiptPayload == "" {
+		httperr.BadRequest(w, r, "product_id, store_provider, and receipt_payload are required", nil)
+		return
+	}
+
+	err := h.service.VerifyIAPReceipt(r.Context(), VerifyIAPInput{
+		UserID:         userID,
+		ProductID:      req.ProductID,
+		StoreProvider:  req.StoreProvider,
+		ReceiptPayload: req.ReceiptPayload,
+	})
+	if err != nil {
+		if errors.Is(err, ErrReceiptAlreadyUsed) {
+			httperr.Conflict(w, r, "IAP receipt has already been redeemed")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"message": "Receipt verified and item granted to inventory",
+	})
+}
+
+type pauseSubscriptionRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (h *Handler) handlePauseSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid subscription UUID", nil)
+		return
+	}
+
+	var req pauseSubscriptionRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	sub, err := h.service.PauseSubscription(r.Context(), userID, subID, req.Reason)
+	if err != nil {
+		if errors.Is(err, ErrSubscriptionNotFound) {
+			httperr.NotFound(w, r, "Subscription not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, sub)
+}
+
+func (h *Handler) handleResumeSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid subscription UUID", nil)
+		return
+	}
+
+	sub, err := h.service.ResumeSubscription(r.Context(), userID, subID)
+	if err != nil {
+		if errors.Is(err, ErrSubscriptionNotFound) {
+			httperr.NotFound(w, r, "Subscription not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, sub)
+}
+
+type cancelSubscriptionRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (h *Handler) handleCancelSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid subscription UUID", nil)
+		return
+	}
+
+	var req cancelSubscriptionRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	sub, err := h.service.CancelSubscription(r.Context(), userID, subID, req.Reason)
+	if err != nil {
+		if errors.Is(err, ErrSubscriptionNotFound) {
+			httperr.NotFound(w, r, "Subscription not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, sub)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

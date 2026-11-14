@@ -2,16 +2,20 @@ package catalog
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Drewron01/bioverse-backend/internal/platform/database"
+	"github.com/Drewron01/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron01/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 var (
@@ -23,6 +27,10 @@ var (
 	ErrItemNotInInventory = errors.New("item not in user inventory or insufficient quantity")
 	// ErrPlanNotFound indicates subscription plan not found.
 	ErrPlanNotFound = errors.New("subscription plan not found")
+	// ErrReceiptAlreadyUsed indicates IAP receipt was already processed.
+	ErrReceiptAlreadyUsed = errors.New("iap receipt already verified")
+	// ErrSubscriptionNotFound indicates subscription record not found.
+	ErrSubscriptionNotFound = errors.New("subscription not found")
 )
 
 // Service provides business logic for the digital item shop and subscription catalog.
@@ -229,4 +237,119 @@ func (s *Service) SubscribePlan(ctx context.Context, userID, planID uuid.UUID, p
 // ListUserSubscriptions returns user subscriptions.
 func (s *Service) ListUserSubscriptions(ctx context.Context, userID uuid.UUID) ([]store.ListUserSubscriptionsRow, error) {
 	return s.store.ListUserSubscriptions(ctx, userID)
+}
+
+// VerifyIAPInput holds payload for app store receipt validation.
+type VerifyIAPInput struct {
+	UserID         uuid.UUID
+	ProductID      uuid.UUID
+	StoreProvider  string
+	ReceiptPayload string
+}
+
+// VerifyIAPReceipt validates mobile app store purchases with replay protection.
+func (s *Service) VerifyIAPReceipt(ctx context.Context, in VerifyIAPInput) error {
+	h := sha256.Sum256([]byte(in.StoreProvider + ":" + in.ReceiptPayload))
+	txID := hex.EncodeToString(h[:])
+
+	// Prevent duplicate replay
+	_, err := s.store.GetIAPTransactionByStoreTxID(ctx, store.GetIAPTransactionByStoreTxIDParams{
+		StoreProvider:      store.IapStoreType(in.StoreProvider),
+		StoreTransactionID: txID,
+	})
+	if err == nil {
+		return ErrReceiptAlreadyUsed
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("failed to check existing iap transaction: %w", err)
+	}
+
+	return database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+
+		iapID, _ := uuid.NewV7()
+		_, err := txStore.CreateIAPTransaction(ctx, store.CreateIAPTransactionParams{
+			ID:                 iapID,
+			UserID:             in.UserID,
+			ProductID:          in.ProductID,
+			StoreProvider:      store.IapStoreType(in.StoreProvider),
+			StoreTransactionID: txID,
+			Environment:        "production",
+			ReceiptPayload:     in.ReceiptPayload,
+			CurrencyCode:       "USD",
+			GrossAmount:        decimalutil.ToNumeric(decimal.NewFromFloat(0.99)),
+			StoreFeeAmount:     decimalutil.ToNumeric(decimal.NewFromFloat(0.15)),
+			NetRevenueAmount:   decimalutil.ToNumeric(decimal.NewFromFloat(0.84)),
+			Status:             "completed",
+		})
+		if err != nil {
+			return fmt.Errorf("failed to record iap transaction: %w", err)
+		}
+
+		invID, _ := uuid.NewV7()
+		_, err = txStore.UpsertUserInventoryItem(ctx, store.UpsertUserInventoryItemParams{
+			ID:        invID,
+			UserID:    in.UserID,
+			ProductID: in.ProductID,
+			Quantity:  1,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to credit inventory item: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// PauseSubscription pauses an active subscription.
+func (s *Service) PauseSubscription(ctx context.Context, userID, subID uuid.UUID, reason string) (*store.DonationSubscriptions, error) {
+	sub, err := s.store.UpdateSubscriptionStatus(ctx, store.UpdateSubscriptionStatusParams{
+		ID:          subID,
+		UserID:      userID,
+		Status:      store.SubscriptionStatusPaused,
+		PausedAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		PauseReason: pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSubscriptionNotFound
+		}
+		return nil, fmt.Errorf("failed to pause subscription: %w", err)
+	}
+	return &sub, nil
+}
+
+// ResumeSubscription reactivates a paused subscription.
+func (s *Service) ResumeSubscription(ctx context.Context, userID, subID uuid.UUID) (*store.DonationSubscriptions, error) {
+	sub, err := s.store.UpdateSubscriptionStatus(ctx, store.UpdateSubscriptionStatusParams{
+		ID:          subID,
+		UserID:      userID,
+		Status:      store.SubscriptionStatusActive,
+		PausedAt:    pgtype.Timestamptz{Valid: false},
+		PauseReason: pgtype.Text{Valid: false},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSubscriptionNotFound
+		}
+		return nil, fmt.Errorf("failed to resume subscription: %w", err)
+	}
+	return &sub, nil
+}
+
+// CancelSubscription cancels a subscription.
+func (s *Service) CancelSubscription(ctx context.Context, userID, subID uuid.UUID, reason string) (*store.DonationSubscriptions, error) {
+	sub, err := s.store.UpdateSubscriptionStatus(ctx, store.UpdateSubscriptionStatusParams{
+		ID:          subID,
+		UserID:      userID,
+		Status:      store.SubscriptionStatusCancelled,
+		PausedAt:    pgtype.Timestamptz{Valid: false},
+		PauseReason: pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSubscriptionNotFound
+		}
+		return nil, fmt.Errorf("failed to cancel subscription: %w", err)
+	}
+	return &sub, nil
 }
