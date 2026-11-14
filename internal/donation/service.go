@@ -29,26 +29,32 @@ var (
 
 // CheckoutInput represents input payload for creating a donation.
 type CheckoutInput struct {
-	IdempotencyKey     string
-	UserID             uuid.UUID
-	ProjectID          uuid.UUID
-	UnitQuantity       int
-	IncludeBioShield   bool
-	TargetPetID        *uuid.UUID
-	CoralNickname      string
-	PointsToUse        int64
-	PaymentMethod      store.PaymentMethodType
+	IdempotencyKey   string
+	UserID           uuid.UUID
+	DonationType     store.DonationType
+	ProjectID        *uuid.UUID
+	UnitQuantity     int
+	IncludeBioShield bool
+	TargetPetID      *uuid.UUID
+	CoralNickname    string
+	SponsoredQuotaID *uuid.UUID
+	PointsToUse      int64
+	PaymentMethod    store.PaymentMethodType
+	BankCode         string
+	IsAnonymous      bool
 }
 
 // DonationResult represents checkout output returned to the client.
 type DonationResult struct {
 	DonationID         uuid.UUID
 	IdempotencyKey     string
+	DonationType       store.DonationType
 	GrossProjectValue  decimal.Decimal
 	MoneyAmountPaid    decimal.Decimal
 	CurrencyCode       string
 	SettlementAmount   decimal.Decimal
 	SettlementCurrency string
+	FxRateSnapshot     decimal.Decimal
 	PointsUsed         int64
 	PointsDiscount     decimal.Decimal
 	PaymentMethod      store.PaymentMethodType
@@ -110,12 +116,16 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		}, nil
 	}
 
-	project, err := s.store.GetConservationProjectByID(ctx, in.ProjectID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid conservation project: %w", err)
+	donationType := in.DonationType
+	if string(donationType) == "" {
+		donationType = store.DonationTypeCoralAdoption
 	}
 
-	if in.IncludeBioShield {
+	var grossValue decimal.Decimal
+	var projectID uuid.UUID
+	var projectTitle string
+
+	if donationType == store.DonationTypeBioShieldAddon {
 		activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify active coral count: %w", err)
@@ -123,17 +133,48 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		if activeCoralsCount <= 0 {
 			return nil, ErrCoralFirstGatingFailed
 		}
+		grossValue = decimal.NewFromFloat(1.80).Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
+
+		if in.ProjectID != nil {
+			projectID = *in.ProjectID
+		} else {
+			myCorals, _ := s.store.ListCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
+			if len(myCorals) > 0 {
+				projectID = myCorals[0].ProjectID
+			}
+		}
+		projectTitle = "Bio-Shield XP Protection Add-on"
+	} else {
+		if in.ProjectID == nil {
+			return nil, errors.New("project_id is required for adoption")
+		}
+		projectID = *in.ProjectID
+
+		project, err := s.store.GetConservationProjectByID(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid conservation project: %w", err)
+		}
+		projectTitle = project.Title
+
+		if in.IncludeBioShield {
+			activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
+			if err != nil {
+				return nil, fmt.Errorf("failed to verify active coral count: %w", err)
+			}
+			if activeCoralsCount <= 0 {
+				return nil, ErrCoralFirstGatingFailed
+			}
+		}
+
+		coralPricePerUnit := decimalutil.FromNumeric(project.PricePerUnitMoney)
+		coralTotal := coralPricePerUnit.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
+
+		bioShieldPrice := decimal.Zero
+		if in.IncludeBioShield {
+			bioShieldPrice = decimal.NewFromFloat(1.80)
+		}
+		grossValue = coralTotal.Add(bioShieldPrice)
 	}
-
-	coralPricePerUnit := decimalutil.FromNumeric(project.PricePerUnitMoney)
-	coralTotal := coralPricePerUnit.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
-
-	bioShieldPrice := decimal.Zero
-	if in.IncludeBioShield {
-		bioShieldPrice = decimal.NewFromFloat(1.80)
-	}
-
-	grossValue := coralTotal.Add(bioShieldPrice)
 
 	pointsRate := decimal.NewFromFloat(0.01) // 100 points = $1.00 USD
 	pointsDiscount := decimal.Zero
@@ -162,7 +203,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 
 	if moneyAmountPaid.IsPositive() {
 		user, _ := s.store.GetUserByID(ctx, in.UserID)
-		inv, err := s.gateway.CreateInvoice(ctx, donationID.String(), settlementAmount, fmt.Sprintf("BioVerse Coral Restoration: %s", project.Title), user.Email)
+		inv, err := s.gateway.CreateInvoice(ctx, donationID.String(), settlementAmount, fmt.Sprintf("BioVerse: %s", projectTitle), user.Email)
 		if err == nil && inv != nil {
 			externalRef = inv.ID
 			if inv.QRISPayload != "" {
@@ -183,7 +224,6 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		vaNumber = fmt.Sprintf("88908%d", time.Now().Unix()%100000000)
 	}
 
-	donationType := store.DonationTypeCoralAdoption
 	if in.IncludeBioShield {
 		donationType = store.DonationTypeBioShieldAddon
 	}
@@ -219,12 +259,18 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			}
 		}
 
+		var sponsoredQuotaUUID pgtype.UUID
+		if in.SponsoredQuotaID != nil {
+			sponsoredQuotaUUID = pgtype.UUID{Bytes: *in.SponsoredQuotaID, Valid: true}
+		}
+
 		d, err := txStore.CreateDonation(ctx, store.CreateDonationParams{
 			ID:                       donationID,
 			IdempotencyKey:           in.IdempotencyKey,
 			UserID:                   in.UserID,
-			ProjectID:                in.ProjectID,
+			ProjectID:                projectID,
 			DonationType:             donationType,
+			IsAnonymous:              in.IsAnonymous,
 			UnitQuantity:             int32(in.UnitQuantity),
 			CurrencyCode:             "USD",
 			GrossProjectValue:        decimalutil.ToNumeric(grossValue),
@@ -246,6 +292,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			PaymentStatus:            store.PaymentStatusPending,
 			ExternalGatewayRef:       pgtype.Text{String: externalRef, Valid: externalRef != ""},
 			ExpiredAt:                pgtype.Timestamptz{Time: expiredAt, Valid: true},
+			SponsoredQuotaID:         sponsoredQuotaUUID,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to insert donation record: %w", err)
@@ -260,11 +307,13 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	return &DonationResult{
 		DonationID:         createdDonation.ID,
 		IdempotencyKey:     createdDonation.IdempotencyKey,
+		DonationType:       createdDonation.DonationType,
 		GrossProjectValue:  decimalutil.FromNumeric(createdDonation.GrossProjectValue),
 		MoneyAmountPaid:    decimalutil.FromNumeric(createdDonation.MoneyAmountPaid),
 		CurrencyCode:       createdDonation.CurrencyCode,
 		SettlementAmount:   decimalutil.FromNumeric(createdDonation.SettlementAmount),
 		SettlementCurrency: createdDonation.SettlementCurrencyCode,
+		FxRateSnapshot:     exchangeRate,
 		PointsUsed:         createdDonation.PointsUsed,
 		PointsDiscount:     decimalutil.FromNumeric(createdDonation.PointsMonetaryEquivalent),
 		PaymentMethod:      createdDonation.MoneyPaymentMethod,

@@ -58,7 +58,7 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	_, err = donSvc.Checkout(ctx, CheckoutInput{
 		IdempotencyKey:   uuid.New().String(),
 		UserID:           userID,
-		ProjectID:        project.ID,
+		ProjectID:        &project.ID,
 		UnitQuantity:     1,
 		IncludeBioShield: true,
 		PaymentMethod:    store.PaymentMethodTypeQris,
@@ -72,7 +72,7 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	checkoutRes, err := donSvc.Checkout(ctx, CheckoutInput{
 		IdempotencyKey:   idempotencyKey,
 		UserID:           userID,
-		ProjectID:        project.ID,
+		ProjectID:        &project.ID,
 		UnitQuantity:     1,
 		IncludeBioShield: false,
 		CoralNickname:    "My First Baby Coral",
@@ -111,7 +111,7 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	bioShieldRes, err := donSvc.Checkout(ctx, CheckoutInput{
 		IdempotencyKey:   uuid.New().String(),
 		UserID:           userID,
-		ProjectID:        project.ID,
+		ProjectID:        &project.ID,
 		UnitQuantity:     1,
 		IncludeBioShield: true,
 		CoralNickname:    "Protected Coral",
