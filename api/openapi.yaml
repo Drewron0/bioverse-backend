@@ -59,14 +59,238 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
         '503':
-          description: Degraded system state (e.g. database unreachable)
+          description: Degraded system state
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
 
+  /v1/app/auth/register:
+    post:
+      tags:
+        - App Auth
+      summary: Register a new user account
+      description: Creates a new user profile with default USD currency, zero streak counter, and initial auth tokens.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User successfully registered and authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Validation error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Email already registered
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/auth/login:
+    post:
+      tags:
+        - App Auth
+      summary: Authenticate user with email and password
+      description: Validates argon2id password and returns a fresh JWT access token and rotating refresh token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successfully authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid email or password
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/auth/refresh:
+    post:
+      tags:
+        - App Auth
+      summary: Rotate and refresh authentication tokens
+      description: Validates an existing refresh token, marks it used/revoked, and returns a new token pair. If a revoked token is reused, all tokens for the user family are revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Tokens rotated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/users/me:
+    get:
+      tags:
+        - App Users
+      summary: Get authenticated user profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
   schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - full_name
+        - email
+        - password
+      properties:
+        full_name:
+          type: string
+          example: Budi Pratama
+        email:
+          type: string
+          format: email
+          example: budi@bioverse.id
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: P@ssword123!
+        timezone:
+          type: string
+          default: Asia/Jakarta
+          example: Asia/Jakarta
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: budi@bioverse.id
+        password:
+          type: string
+          format: password
+          example: P@ssword123!
+        device_info:
+          type: string
+          example: Flutter Android Pixel 7
+
+    RefreshRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          example: 9a7b3c2d1e4f...
+        device_info:
+          type: string
+          example: Flutter Android Pixel 7
+
+    AuthResponse:
+      type: object
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+        - expires_in
+        - user
+      properties:
+        access_token:
+          type: string
+          description: 15-minute JWT Bearer token
+        refresh_token:
+          type: string
+          description: Rotating refresh token
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Lifetime of access_token in seconds (e.g. 900 for 15m)
+          example: 900
+        user:
+          $ref: '#/components/schemas/UserProfileResponse'
+
+    UserProfileResponse:
+      type: object
+      required:
+        - id
+        - full_name
+        - email
+        - timezone
+        - preferred_currency_code
+        - points_balance
+        - current_streak
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0193297a-96e0-7988-9271-e0e649ce4301
+        full_name:
+          type: string
+          example: Budi Pratama
+        email:
+          type: string
+          example: budi@bioverse.id
+        timezone:
+          type: string
+          example: Asia/Jakarta
+        preferred_currency_code:
+          type: string
+          example: USD
+        points_balance:
+          type: integer
+          example: 0
+        current_streak:
+          type: integer
+          example: 0
+
     HealthResponse:
       type: object
       required:
@@ -131,18 +355,3 @@ components:
             type: string
           example:
             email: Must be a valid email address.
-
-    Money:
-      type: object
-      required:
-        - amount
-        - currency
-      properties:
-        amount:
-          type: string
-          description: Decimal string representation of monetary amount to avoid floating-point loss.
-          example: "3.20"
-        currency:
-          type: string
-          description: ISO 4217 three-letter currency code.
-          example: "USD"
