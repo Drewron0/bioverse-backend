@@ -8,22 +8,60 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	ClearUserPrimaryPets(ctx context.Context, userID uuid.UUID) error
+	CountActiveCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) (int64, error)
+	CreateCoralFragment(ctx context.Context, arg CreateCoralFragmentParams) (CreateCoralFragmentRow, error)
+	CreateDonation(ctx context.Context, arg CreateDonationParams) (Donations, error)
+	CreateMissionSubmission(ctx context.Context, arg CreateMissionSubmissionParams) (UserMissionSubmissions, error)
+	CreatePetBoost(ctx context.Context, arg CreatePetBoostParams) (PetBoosts, error)
+	CreatePointLedgerEntry(ctx context.Context, arg CreatePointLedgerEntryParams) (PointLedgers, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	CreateUserStreak(ctx context.Context, userID uuid.UUID) (UserStreaks, error)
 	CreateUserToken(ctx context.Context, arg CreateUserTokenParams) (CreateUserTokenRow, error)
+	CreateVirtualPet(ctx context.Context, arg CreateVirtualPetParams) (VirtualPets, error)
+	CreditUserPoints(ctx context.Context, arg CreditUserPointsParams) (CreditUserPointsRow, error)
+	GetConservationProjectByID(ctx context.Context, id uuid.UUID) (GetConservationProjectByIDRow, error)
 	GetCurrencyByCode(ctx context.Context, code string) (Currencies, error)
+	GetDigitalProductBySKU(ctx context.Context, arg GetDigitalProductBySKUParams) (GetDigitalProductBySKURow, error)
+	GetDonationByID(ctx context.Context, id uuid.UUID) (Donations, error)
+	GetDonationByIdempotencyKey(ctx context.Context, idempotencyKey string) (Donations, error)
 	GetLatestExchangeRate(ctx context.Context, arg GetLatestExchangeRateParams) (ExchangeRates, error)
+	GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) ([]GetLeaderboardRow, error)
+	GetMissionByID(ctx context.Context, id uuid.UUID) (EcoMissions, error)
+	GetMissionSubmissionByID(ctx context.Context, arg GetMissionSubmissionByIDParams) (UserMissionSubmissions, error)
+	GetOpenSpiderFrameForZone(ctx context.Context, zoneID uuid.UUID) (GetOpenSpiderFrameForZoneRow, error)
+	GetTodaySubmissionForMission(ctx context.Context, arg GetTodaySubmissionForMissionParams) (UserMissionSubmissions, error)
 	GetUserByEmail(ctx context.Context, email string) (Users, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (Users, error)
 	GetUserStreakByUserID(ctx context.Context, userID uuid.UUID) (UserStreaks, error)
 	GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHashParams) (UserTokens, error)
+	GetVirtualPetByID(ctx context.Context, arg GetVirtualPetByIDParams) (GetVirtualPetByIDRow, error)
+	IncrementProjectFundedUnits(ctx context.Context, arg IncrementProjectFundedUnitsParams) (IncrementProjectFundedUnitsRow, error)
+	IncrementSpiderFrameFragmentsPlanted(ctx context.Context, arg IncrementSpiderFrameFragmentsPlantedParams) (IncrementSpiderFrameFragmentsPlantedRow, error)
 	ListActiveCurrencies(ctx context.Context) ([]Currencies, error)
+	ListActiveDigitalProducts(ctx context.Context, currencyCode string) ([]ListActiveDigitalProductsRow, error)
+	ListActiveMissions(ctx context.Context) ([]EcoMissions, error)
+	ListActivePetBoosts(ctx context.Context, petID uuid.UUID) ([]PetBoosts, error)
+	ListActiveSubscriptionPlans(ctx context.Context, currencyCode string) ([]ListActiveSubscriptionPlansRow, error)
+	ListConservationProjects(ctx context.Context) ([]ListConservationProjectsRow, error)
+	ListCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) ([]ListCoralFragmentsByUserIDRow, error)
+	ListDonationsByUserID(ctx context.Context, userID uuid.UUID) ([]ListDonationsByUserIDRow, error)
+	ListSubmissionsByUserID(ctx context.Context, arg ListSubmissionsByUserIDParams) ([]ListSubmissionsByUserIDRow, error)
+	ListVirtualPetsByUserID(ctx context.Context, userID uuid.UUID) ([]ListVirtualPetsByUserIDRow, error)
+	LockUserPoints(ctx context.Context, arg LockUserPointsParams) (LockUserPointsRow, error)
 	MarkUserTokenUsed(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserTokensForUser(ctx context.Context, arg RevokeAllUserTokensForUserParams) error
 	RevokeUserToken(ctx context.Context, id uuid.UUID) error
+	SetPrimaryPet(ctx context.Context, arg SetPrimaryPetParams) (VirtualPets, error)
+	SpendUserPoints(ctx context.Context, arg SpendUserPointsParams) (SpendUserPointsRow, error)
+	UnlockUserPoints(ctx context.Context, arg UnlockUserPointsParams) (UnlockUserPointsRow, error)
+	UpdateDonationPaymentStatus(ctx context.Context, arg UpdateDonationPaymentStatusParams) (Donations, error)
+	UpdateUserStreak(ctx context.Context, arg UpdateUserStreakParams) (UserStreaks, error)
+	UpdateVirtualPetHealthAndXP(ctx context.Context, arg UpdateVirtualPetHealthAndXPParams) (VirtualPets, error)
 }
 
 var _ Querier = (*Queries)(nil)

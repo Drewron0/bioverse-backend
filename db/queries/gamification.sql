@@ -1,0 +1,156 @@
+-- name: CountActiveCoralFragmentsByUserID :one
+SELECT COUNT(*) FROM coral_fragments
+WHERE adopted_by_user_id = $1 AND lifecycle_status != 'deceased';
+
+-- name: ListVirtualPetsByUserID :many
+SELECT vp.id, vp.user_id, vp.fragment_id, vp.equipped_product_id, vp.pet_name,
+       vp.pet_species, vp.coral_type, vp.growth_stage, vp.health_percent,
+       vp.level, vp.experience_points, vp.is_primary, vp.last_interacted_at,
+       vp.adopted_at, vp.created_at,
+       cf.fragment_code, cf.nickname AS coral_nickname
+FROM virtual_pets vp
+LEFT JOIN coral_fragments cf ON vp.fragment_id = cf.id
+WHERE vp.user_id = $1
+ORDER BY vp.is_primary DESC, vp.created_at ASC;
+
+-- name: GetVirtualPetByID :one
+SELECT vp.id, vp.user_id, vp.fragment_id, vp.equipped_product_id, vp.pet_name,
+       vp.pet_species, vp.coral_type, vp.growth_stage, vp.health_percent,
+       vp.level, vp.experience_points, vp.is_primary, vp.last_interacted_at,
+       vp.adopted_at, vp.created_at,
+       cf.fragment_code, cf.nickname AS coral_nickname
+FROM virtual_pets vp
+LEFT JOIN coral_fragments cf ON vp.fragment_id = cf.id
+WHERE vp.id = $1 AND vp.user_id = $2
+LIMIT 1;
+
+-- name: CreateVirtualPet :one
+INSERT INTO virtual_pets (
+    id, user_id, fragment_id, pet_name, pet_species, coral_type, is_primary
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+) RETURNING *;
+
+-- name: ClearUserPrimaryPets :exec
+UPDATE virtual_pets
+SET is_primary = false
+WHERE user_id = $1;
+
+-- name: SetPrimaryPet :one
+UPDATE virtual_pets
+SET is_primary = true
+WHERE id = $1 AND user_id = $2
+RETURNING *;
+
+-- name: UpdateVirtualPetHealthAndXP :one
+UPDATE virtual_pets
+SET health_percent = $3,
+    experience_points = $4,
+    level = $5,
+    growth_stage = $6,
+    last_interacted_at = $7
+WHERE id = $1 AND user_id = $2
+RETURNING *;
+
+-- name: CreatePetBoost :one
+INSERT INTO pet_boosts (
+    id, user_id, pet_id, donation_id, product_id, boost_type, xp_multiplier, expires_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING *;
+
+-- name: ListActivePetBoosts :many
+SELECT id, user_id, pet_id, donation_id, product_id, boost_type, xp_multiplier, is_active, started_at, expires_at
+FROM pet_boosts
+WHERE pet_id = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW());
+
+-- name: UpdateUserStreak :one
+UPDATE user_streaks
+SET current_streak = $2,
+    longest_streak = $3,
+    last_streak_date = $4,
+    last_freeze_used_date = $5,
+    updated_at = NOW()
+WHERE user_id = $1
+RETURNING user_id, current_streak, longest_streak, last_streak_date, last_freeze_used_date, updated_at;
+
+-- name: ListActiveMissions :many
+SELECT id, sponsor_company_id, title, description, instructions, category, difficulty, image_url,
+       points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at
+FROM eco_missions
+WHERE is_active = true
+ORDER BY is_daily DESC, points_reward ASC;
+
+-- name: GetMissionByID :one
+SELECT id, sponsor_company_id, title, description, instructions, category, difficulty, image_url,
+       points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at
+FROM eco_missions
+WHERE id = $1 AND is_active = true
+LIMIT 1;
+
+-- name: GetTodaySubmissionForMission :one
+SELECT * FROM user_mission_submissions
+WHERE user_id = $1 AND mission_id = $2 AND submission_date = $3 AND status != 'rejected'
+LIMIT 1;
+
+-- name: CreateMissionSubmission :one
+INSERT INTO user_mission_submissions (
+    id, user_id, mission_id, pet_id, submission_date, proof_image_url, image_hash, status,
+    cv_job_id, cv_model_version, cv_confidence_score, cv_raw_response, awarded_points, awarded_xp, submitted_at, verified_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12, $13, $14, NOW(), $15
+) RETURNING *;
+
+-- name: GetMissionSubmissionByID :one
+SELECT * FROM user_mission_submissions
+WHERE id = $1 AND user_id = $2
+LIMIT 1;
+
+-- name: ListSubmissionsByUserID :many
+SELECT s.*, m.title AS mission_title, m.category AS mission_category
+FROM user_mission_submissions s
+JOIN eco_missions m ON s.mission_id = m.id
+WHERE s.user_id = $1
+ORDER BY s.submitted_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CreditUserPoints :one
+UPDATE users
+SET points_balance = points_balance + $2
+WHERE id = $1
+RETURNING id, points_balance, locked_points_balance;
+
+-- name: GetLeaderboard :many
+SELECT id, full_name, avatar_url, points_balance,
+       ROW_NUMBER() OVER (ORDER BY points_balance DESC, created_at ASC) AS rank_position
+FROM users
+WHERE deleted_at IS NULL
+ORDER BY points_balance DESC, created_at ASC
+LIMIT $1 OFFSET $2;
+
+-- name: CreatePointLedgerEntry :one
+INSERT INTO point_ledgers (
+    id, user_id, transaction_type, amount, balance_after, reference_type, reference_id, description
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING *;
+
+-- name: LockUserPoints :one
+UPDATE users
+SET locked_points_balance = locked_points_balance + $2
+WHERE id = $1 AND (points_balance - locked_points_balance) >= $2
+RETURNING id, points_balance, locked_points_balance;
+
+-- name: UnlockUserPoints :one
+UPDATE users
+SET locked_points_balance = locked_points_balance - $2
+WHERE id = $1 AND locked_points_balance >= $2
+RETURNING id, points_balance, locked_points_balance;
+
+-- name: SpendUserPoints :one
+UPDATE users
+SET points_balance = points_balance - $2,
+    locked_points_balance = locked_points_balance - $2
+WHERE id = $1 AND points_balance >= $2 AND locked_points_balance >= $2
+RETURNING id, points_balance, locked_points_balance;

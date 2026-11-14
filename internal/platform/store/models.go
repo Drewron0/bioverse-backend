@@ -1635,6 +1635,13 @@ type AdminTokens struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type AppSettings struct {
+	SettingKey   string             `json:"setting_key"`
+	SettingValue []byte             `json:"setting_value"`
+	Description  string             `json:"description"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditLogs struct {
 	ID         uuid.UUID          `json:"id"`
 	AdminID    pgtype.UUID        `json:"admin_id"`
@@ -1649,6 +1656,182 @@ type AuditLogs struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type B2bContracts struct {
+	ID                    uuid.UUID          `json:"id"`
+	CompanyID             uuid.UUID          `json:"company_id"`
+	PackageID             uuid.UUID          `json:"package_id"`
+	RenewedFromContractID pgtype.UUID        `json:"renewed_from_contract_id"`
+	CreatedByMemberID     uuid.UUID          `json:"created_by_member_id"`
+	Status                ContractStatus     `json:"status"`
+	CurrencyCode          string             `json:"currency_code"`
+	ContractValue         pgtype.Numeric     `json:"contract_value"`
+	StartDate             pgtype.Date        `json:"start_date"`
+	EndDate               pgtype.Date        `json:"end_date"`
+	AutoRenew             bool               `json:"auto_renew"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type B2bPackages struct {
+	ID                  uuid.UUID          `json:"id"`
+	SkuCode             string             `json:"sku_code"`
+	Name                string             `json:"name"`
+	PackageType         B2bPackageType     `json:"package_type"`
+	CurrencyCode        string             `json:"currency_code"`
+	PriceAmount         pgtype.Numeric     `json:"price_amount"`
+	SpiderFramesCount   int32              `json:"spider_frames_count"`
+	CoralFragmentsCount int32              `json:"coral_fragments_count"`
+	TreeSeedlingsCount  int32              `json:"tree_seedlings_count"`
+	IncludesPlaque      bool               `json:"includes_plaque"`
+	IncludesDashboard   bool               `json:"includes_dashboard"`
+	IsActive            bool               `json:"is_active"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type B2bSponsorshipInvoices struct {
+	ID                      uuid.UUID          `json:"id"`
+	InvoiceNumber           string             `json:"invoice_number"`
+	CompanyID               uuid.UUID          `json:"company_id"`
+	ContractID              uuid.UUID          `json:"contract_id"`
+	CreatedByMemberID       uuid.UUID          `json:"created_by_member_id"`
+	SponsoredFramesCount    int32              `json:"sponsored_frames_count"`
+	SponsoredFragmentsCount int32              `json:"sponsored_fragments_count"`
+	CurrencyCode            string             `json:"currency_code"`
+	TotalAmount             pgtype.Numeric     `json:"total_amount"`
+	SettlementCurrencyCode  string             `json:"settlement_currency_code"`
+	SettlementAmount        pgtype.Numeric     `json:"settlement_amount"`
+	FxRateSnapshot          pgtype.Numeric     `json:"fx_rate_snapshot"`
+	PaymentMethod           PaymentMethodType  `json:"payment_method"`
+	PaymentProvider         string             `json:"payment_provider"`
+	Status                  PaymentStatus      `json:"status"`
+	ExternalGatewayRef      pgtype.Text        `json:"external_gateway_ref"`
+	InvoicePdfUrl           pgtype.Text        `json:"invoice_pdf_url"`
+	PaymentProofUrl         pgtype.Text        `json:"payment_proof_url"`
+	DueDate                 pgtype.Date        `json:"due_date"`
+	PaidAt                  pgtype.Timestamptz `json:"paid_at"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
+type CommunityGroups struct {
+	ID           uuid.UUID          `json:"id"`
+	ZoneID       uuid.UUID          `json:"zone_id"`
+	Name         string             `json:"name"`
+	GroupType    CommunityGroupType `json:"group_type"`
+	ContactPhone string             `json:"contact_phone"`
+	IsActive     bool               `json:"is_active"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type Companies struct {
+	ID                            uuid.UUID          `json:"id"`
+	LegalName                     string             `json:"legal_name"`
+	IdxOjkTicker                  pgtype.Text        `json:"idx_ojk_ticker"`
+	VectorLogoUrl                 pgtype.Text        `json:"vector_logo_url"`
+	PicName                       string             `json:"pic_name"`
+	WorkEmail                     string             `json:"work_email"`
+	ContactPhone                  string             `json:"contact_phone"`
+	MandatoryFramework            string             `json:"mandatory_framework"`
+	BiodiversityStandard          string             `json:"biodiversity_standard"`
+	ReportingFrequency            string             `json:"reporting_frequency"`
+	ExportFormat                  string             `json:"export_format"`
+	ExternalAuditorDirectAccess   bool               `json:"external_auditor_direct_access"`
+	AnnualFragmentTarget          int32              `json:"annual_fragment_target"`
+	BaselineSurvivalBenchmark     pgtype.Numeric     `json:"baseline_survival_benchmark"`
+	TargetSroiRatio               pgtype.Numeric     `json:"target_sroi_ratio"`
+	DefaultPlaqueInscriptionText  pgtype.Text        `json:"default_plaque_inscription_text"`
+	PublicTransparencyFeedEnabled bool               `json:"public_transparency_feed_enabled"`
+	SendMonthlyCleaningCert       bool               `json:"send_monthly_cleaning_cert"`
+	CreatedAt                     pgtype.Timestamptz `json:"created_at"`
+}
+
+type CompanyMembers struct {
+	ID              uuid.UUID          `json:"id"`
+	CompanyID       uuid.UUID          `json:"company_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	InvitedEmail    string             `json:"invited_email"`
+	FullName        string             `json:"full_name"`
+	Role            B2bRole            `json:"role"`
+	Permission      B2bPermission      `json:"permission"`
+	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	InviteExpiresAt pgtype.Timestamptz `json:"invite_expires_at"`
+	IsAccepted      bool               `json:"is_accepted"`
+	InvitedAt       pgtype.Timestamptz `json:"invited_at"`
+	JoinedAt        pgtype.Timestamptz `json:"joined_at"`
+}
+
+type ConservationProjects struct {
+	ID                    uuid.UUID                 `json:"id"`
+	ZoneID                uuid.UUID                 `json:"zone_id"`
+	Title                 string                    `json:"title"`
+	Description           string                    `json:"description"`
+	Objectives            string                    `json:"objectives"`
+	Category              ProjectCategory           `json:"category"`
+	SpeciesOrTypeName     string                    `json:"species_or_type_name"`
+	ImageUrl              string                    `json:"image_url"`
+	Status                ProjectStatus             `json:"status"`
+	PhysicalHealthStatus  EnvironmentalHealthStatus `json:"physical_health_status"`
+	IsUnderfundedAdjusted bool                      `json:"is_underfunded_adjusted"`
+	OriginalTargetAmount  pgtype.Numeric            `json:"original_target_amount"`
+	OriginalTargetUnits   pgtype.Int4               `json:"original_target_units"`
+	AdjustedAt            pgtype.Timestamptz        `json:"adjusted_at"`
+	UnitName              string                    `json:"unit_name"`
+	CurrencyCode          string                    `json:"currency_code"`
+	PricePerUnitMoney     pgtype.Numeric            `json:"price_per_unit_money"`
+	PricePerUnitPoints    int64                     `json:"price_per_unit_points"`
+	TargetAmount          pgtype.Numeric            `json:"target_amount"`
+	TargetUnits           int32                     `json:"target_units"`
+	FundedUnitsCount      int32                     `json:"funded_units_count"`
+	PlantedUnitsCount     int32                     `json:"planted_units_count"`
+	SurvivingUnitsCount   int32                     `json:"surviving_units_count"`
+	ReplantReservePct     pgtype.Numeric            `json:"replant_reserve_pct"`
+	DonationStartDate     pgtype.Date               `json:"donation_start_date"`
+	DonationEndDate       pgtype.Date               `json:"donation_end_date"`
+	EstimatedPlantingDate pgtype.Date               `json:"estimated_planting_date"`
+	CreatedAt             pgtype.Timestamptz        `json:"created_at"`
+}
+
+type ConservationZones struct {
+	ID             uuid.UUID          `json:"id"`
+	Name           string             `json:"name"`
+	Region         string             `json:"region"`
+	Province       string             `json:"province"`
+	EcosystemType  EcosystemKind      `json:"ecosystem_type"`
+	AllocationType ZoneAllocationType `json:"allocation_type"`
+	Latitude       pgtype.Numeric     `json:"latitude"`
+	Longitude      pgtype.Numeric     `json:"longitude"`
+	MinDepthMeters pgtype.Numeric     `json:"min_depth_meters"`
+	MaxDepthMeters pgtype.Numeric     `json:"max_depth_meters"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type CoralFragments struct {
+	ID                  uuid.UUID                     `json:"id"`
+	FragmentCode        string                        `json:"fragment_code"`
+	Nickname            pgtype.Text                   `json:"nickname"`
+	ProjectID           uuid.UUID                     `json:"project_id"`
+	DonationID          pgtype.UUID                   `json:"donation_id"`
+	SpiderFrameID       pgtype.UUID                   `json:"spider_frame_id"`
+	AdoptedByUserID     pgtype.UUID                   `json:"adopted_by_user_id"`
+	PlantedByOperatorID pgtype.UUID                   `json:"planted_by_operator_id"`
+	SpeciesName         string                        `json:"species_name"`
+	LifecycleStatus     FragmentLifecycleStatus       `json:"lifecycle_status"`
+	HealthStatus        NullEnvironmentalHealthStatus `json:"health_status"`
+	LatestPhotoUrl      pgtype.Text                   `json:"latest_photo_url"`
+	PlantedAt           pgtype.Timestamptz            `json:"planted_at"`
+	LastMonitoredAt     pgtype.Timestamptz            `json:"last_monitored_at"`
+	CreatedAt           pgtype.Timestamptz            `json:"created_at"`
+}
+
+type CorporatePrAssets struct {
+	ID            uuid.UUID          `json:"id"`
+	CompanyID     uuid.UUID          `json:"company_id"`
+	SpiderFrameID pgtype.UUID        `json:"spider_frame_id"`
+	AssetCategory string             `json:"asset_category"`
+	Title         string             `json:"title"`
+	FileFormat    string             `json:"file_format"`
+	FileUrl       string             `json:"file_url"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Currencies struct {
 	Code             string             `json:"code"`
 	Name             string             `json:"name"`
@@ -1659,6 +1842,135 @@ type Currencies struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type DigitalProducts struct {
+	ID              uuid.UUID          `json:"id"`
+	SkuCode         string             `json:"sku_code"`
+	AppleProductID  pgtype.Text        `json:"apple_product_id"`
+	GoogleProductID pgtype.Text        `json:"google_product_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	ItemType        DigitalItemType    `json:"item_type"`
+	PricePoints     int64              `json:"price_points"`
+	IsIapOnly       bool               `json:"is_iap_only"`
+	Attributes      []byte             `json:"attributes"`
+	PreviewAssetUrl string             `json:"preview_asset_url"`
+	IsActive        bool               `json:"is_active"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonationSubscriptions struct {
+	ID                         uuid.UUID             `json:"id"`
+	UserID                     uuid.UUID             `json:"user_id"`
+	PlanID                     pgtype.UUID           `json:"plan_id"`
+	ProjectID                  pgtype.UUID           `json:"project_id"`
+	Frequency                  SubscriptionFrequency `json:"frequency"`
+	DurationMonths             pgtype.Int4           `json:"duration_months"`
+	CompletedCycles            int32                 `json:"completed_cycles"`
+	UnitQuantity               int32                 `json:"unit_quantity"`
+	CurrencyCode               string                `json:"currency_code"`
+	AmountPerCycle             pgtype.Numeric        `json:"amount_per_cycle"`
+	PaymentMethod              PaymentMethodType     `json:"payment_method"`
+	PaymentProvider            string                `json:"payment_provider"`
+	GatewayCustomerIDEncrypted []byte                `json:"gateway_customer_id_encrypted"`
+	PaymentTokenEncrypted      []byte                `json:"payment_token_encrypted"`
+	FailedChargeCount          int32                 `json:"failed_charge_count"`
+	LastFailedAt               pgtype.Timestamptz    `json:"last_failed_at"`
+	Status                     SubscriptionStatus    `json:"status"`
+	PauseReason                pgtype.Text           `json:"pause_reason"`
+	PausedAt                   pgtype.Timestamptz    `json:"paused_at"`
+	LastReminderSentAt         pgtype.Timestamptz    `json:"last_reminder_sent_at"`
+	ResumePaymentUrl           pgtype.Text           `json:"resume_payment_url"`
+	NextBillingDate            pgtype.Date           `json:"next_billing_date"`
+	CreatedAt                  pgtype.Timestamptz    `json:"created_at"`
+}
+
+type Donations struct {
+	ID                       uuid.UUID          `json:"id"`
+	IdempotencyKey           string             `json:"idempotency_key"`
+	UserID                   uuid.UUID          `json:"user_id"`
+	ProjectID                uuid.UUID          `json:"project_id"`
+	SubscriptionID           pgtype.UUID        `json:"subscription_id"`
+	SponsoredQuotaID         pgtype.UUID        `json:"sponsored_quota_id"`
+	CycleNumber              pgtype.Int4        `json:"cycle_number"`
+	DonationType             DonationType       `json:"donation_type"`
+	IsAnonymous              bool               `json:"is_anonymous"`
+	UnitQuantity             int32              `json:"unit_quantity"`
+	CurrencyCode             string             `json:"currency_code"`
+	GrossProjectValue        pgtype.Numeric     `json:"gross_project_value"`
+	MoneyAmountPaid          pgtype.Numeric     `json:"money_amount_paid"`
+	SettlementCurrencyCode   string             `json:"settlement_currency_code"`
+	SettlementAmount         pgtype.Numeric     `json:"settlement_amount"`
+	FxRateSnapshot           pgtype.Numeric     `json:"fx_rate_snapshot"`
+	GatewayFeeSettlement     pgtype.Numeric     `json:"gateway_fee_settlement"`
+	MoneyPaymentMethod       PaymentMethodType  `json:"money_payment_method"`
+	PaymentProvider          string             `json:"payment_provider"`
+	IsMixedPayment           bool               `json:"is_mixed_payment"`
+	BankCode                 pgtype.Text        `json:"bank_code"`
+	VaNumber                 pgtype.Text        `json:"va_number"`
+	QrisPayload              pgtype.Text        `json:"qris_payload"`
+	PointsUsed               int64              `json:"points_used"`
+	PointsRateSnapshot       pgtype.Numeric     `json:"points_rate_snapshot"`
+	PointsMonetaryEquivalent pgtype.Numeric     `json:"points_monetary_equivalent"`
+	IsPointsLocked           bool               `json:"is_points_locked"`
+	PaymentStatus            PaymentStatus      `json:"payment_status"`
+	ExternalGatewayRef       pgtype.Text        `json:"external_gateway_ref"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
+	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+}
+
+type EcoMissions struct {
+	ID                  uuid.UUID          `json:"id"`
+	SponsorCompanyID    pgtype.UUID        `json:"sponsor_company_id"`
+	Title               string             `json:"title"`
+	Description         string             `json:"description"`
+	Instructions        string             `json:"instructions"`
+	Category            pgtype.Text        `json:"category"`
+	Difficulty          pgtype.Text        `json:"difficulty"`
+	ImageUrl            pgtype.Text        `json:"image_url"`
+	PointsReward        int64              `json:"points_reward"`
+	XpReward            int64              `json:"xp_reward"`
+	RequiresCameraProof bool               `json:"requires_camera_proof"`
+	CvTargetLabel       pgtype.Text        `json:"cv_target_label"`
+	CvMinConfidence     pgtype.Numeric     `json:"cv_min_confidence"`
+	IsDaily             bool               `json:"is_daily"`
+	IsActive            bool               `json:"is_active"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type EsgAuditReports struct {
+	ID                   uuid.UUID          `json:"id"`
+	CompanyID            uuid.UUID          `json:"company_id"`
+	GeneratedByMemberID  pgtype.UUID        `json:"generated_by_member_id"`
+	Title                string             `json:"title"`
+	FiscalYear           int32              `json:"fiscal_year"`
+	FiscalQuarter        int32              `json:"fiscal_quarter"`
+	ReportingPeriodLabel string             `json:"reporting_period_label"`
+	Pojk51ReadinessPct   pgtype.Numeric     `json:"pojk51_readiness_pct"`
+	GriCriteriaMet       int32              `json:"gri_criteria_met"`
+	AssuranceGrade       string             `json:"assurance_grade"`
+	ChapterPdfUrl        pgtype.Text        `json:"chapter_pdf_url"`
+	RawDatasetCsvUrl     pgtype.Text        `json:"raw_dataset_csv_url"`
+	VisualAnnexZipUrl    pgtype.Text        `json:"visual_annex_zip_url"`
+	AuditorStatus        ReportAuditStatus  `json:"auditor_status"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type EsgBiodiversityMetrics struct {
+	ID                 uuid.UUID          `json:"id"`
+	CompanyID          uuid.UUID          `json:"company_id"`
+	FiscalYear         int32              `json:"fiscal_year"`
+	FiscalQuarter      int32              `json:"fiscal_quarter"`
+	IndicatorName      string             `json:"indicator_name"`
+	Unit               string             `json:"unit"`
+	BaselineValue      pgtype.Numeric     `json:"baseline_value"`
+	CurrentValue       pgtype.Numeric     `json:"current_value"`
+	TargetValue        pgtype.Numeric     `json:"target_value"`
+	VariancePercentage pgtype.Numeric     `json:"variance_percentage"`
+	Status             ComplianceStatus   `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
 type ExchangeRates struct {
 	ID          uuid.UUID          `json:"id"`
 	BaseCode    string             `json:"base_code"`
@@ -1667,6 +1979,102 @@ type ExchangeRates struct {
 	Source      string             `json:"source"`
 	EffectiveAt pgtype.Timestamptz `json:"effective_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type FieldOperators struct {
+	ID                    uuid.UUID             `json:"id"`
+	ZoneID                uuid.UUID             `json:"zone_id"`
+	GroupID               pgtype.UUID           `json:"group_id"`
+	VerifiedByAdminID     pgtype.UUID           `json:"verified_by_admin_id"`
+	FullName              string                `json:"full_name"`
+	CanLogin              bool                  `json:"can_login"`
+	Email                 pgtype.Text           `json:"email"`
+	PhoneNumber           string                `json:"phone_number"`
+	PasswordHash          pgtype.Text           `json:"password_hash"`
+	OperatorRole          OperatorRole          `json:"operator_role"`
+	NikEncrypted          []byte                `json:"nik_encrypted"`
+	NikHmac               pgtype.Text           `json:"nik_hmac"`
+	KycStatus             KycVerificationStatus `json:"kyc_status"`
+	BankCode              pgtype.Text           `json:"bank_code"`
+	BankAccountEncrypted  []byte                `json:"bank_account_encrypted"`
+	BankAccountHolder     pgtype.Text           `json:"bank_account_holder"`
+	RatePerPlantingIdr    pgtype.Numeric        `json:"rate_per_planting_idr"`
+	RatePerMaintenanceIdr pgtype.Numeric        `json:"rate_per_maintenance_idr"`
+	IsActive              bool                  `json:"is_active"`
+	CreatedAt             pgtype.Timestamptz    `json:"created_at"`
+}
+
+type FieldServiceRequests struct {
+	ID                  uuid.UUID          `json:"id"`
+	CompanyID           uuid.UUID          `json:"company_id"`
+	SpiderFrameID       uuid.UUID          `json:"spider_frame_id"`
+	RequestedByMemberID uuid.UUID          `json:"requested_by_member_id"`
+	AssignedOperatorID  pgtype.UUID        `json:"assigned_operator_id"`
+	RequestType         RequestType        `json:"request_type"`
+	Status              RequestStatus      `json:"status"`
+	AgreedFeeIdr        pgtype.Numeric     `json:"agreed_fee_idr"`
+	ScheduledDate       pgtype.Date        `json:"scheduled_date"`
+	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
+	ResultMediaUrl      pgtype.Text        `json:"result_media_url"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type IapTransactions struct {
+	ID                    uuid.UUID          `json:"id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	ProductID             uuid.UUID          `json:"product_id"`
+	StoreProvider         IapStoreType       `json:"store_provider"`
+	StoreTransactionID    string             `json:"store_transaction_id"`
+	OriginalTransactionID pgtype.Text        `json:"original_transaction_id"`
+	Environment           string             `json:"environment"`
+	ReceiptPayload        string             `json:"receipt_payload"`
+	CurrencyCode          string             `json:"currency_code"`
+	GrossAmount           pgtype.Numeric     `json:"gross_amount"`
+	StoreFeeAmount        pgtype.Numeric     `json:"store_fee_amount"`
+	NetRevenueAmount      pgtype.Numeric     `json:"net_revenue_amount"`
+	Status                PaymentStatus      `json:"status"`
+	VerifiedAt            pgtype.Timestamptz `json:"verified_at"`
+	RevokedAt             pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type MediaEvidences struct {
+	ID                   uuid.UUID          `json:"id"`
+	ProjectID            pgtype.UUID        `json:"project_id"`
+	SpiderFrameID        pgtype.UUID        `json:"spider_frame_id"`
+	CoralFragmentID      pgtype.UUID        `json:"coral_fragment_id"`
+	CompanyID            pgtype.UUID        `json:"company_id"`
+	CapturedByOperatorID pgtype.UUID        `json:"captured_by_operator_id"`
+	VerifiedByOperatorID pgtype.UUID        `json:"verified_by_operator_id"`
+	UploadedByAdminID    pgtype.UUID        `json:"uploaded_by_admin_id"`
+	MediaType            EvidenceMediaType  `json:"media_type"`
+	MilestoneMonth       pgtype.Int4        `json:"milestone_month"`
+	MilestoneTitle       pgtype.Text        `json:"milestone_title"`
+	SubtitleMetrics      pgtype.Text        `json:"subtitle_metrics"`
+	MediaUrl             string             `json:"media_url"`
+	RawArchiveUrl        pgtype.Text        `json:"raw_archive_url"`
+	GpsLatitude          pgtype.Numeric     `json:"gps_latitude"`
+	GpsLongitude         pgtype.Numeric     `json:"gps_longitude"`
+	DepthMeters          pgtype.Numeric     `json:"depth_meters"`
+	IsVerifiedHealthy    bool               `json:"is_verified_healthy"`
+	CvModelVersion       pgtype.Text        `json:"cv_model_version"`
+	CvConfidenceScore    pgtype.Numeric     `json:"cv_confidence_score"`
+	CvRawResponse        []byte             `json:"cv_raw_response"`
+	ExifMetadata         []byte             `json:"exif_metadata"`
+	CapturedAt           pgtype.Timestamptz `json:"captured_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type NewsArticles struct {
+	ID           uuid.UUID          `json:"id"`
+	Title        string             `json:"title"`
+	Category     ProjectCategory    `json:"category"`
+	Summary      string             `json:"summary"`
+	Content      string             `json:"content"`
+	ThumbnailUrl string             `json:"thumbnail_url"`
+	IsFeatured   bool               `json:"is_featured"`
+	PublishedAt  pgtype.Timestamptz `json:"published_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type Notifications struct {
@@ -1680,6 +2088,72 @@ type Notifications struct {
 	IsRead           bool               `json:"is_read"`
 	ReadAt           pgtype.Timestamptz `json:"read_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type OperatorPayouts struct {
+	ID                     uuid.UUID          `json:"id"`
+	IdempotencyKey         string             `json:"idempotency_key"`
+	OperatorID             uuid.UUID          `json:"operator_id"`
+	ApprovedByAdminID      pgtype.UUID        `json:"approved_by_admin_id"`
+	PeriodStart            pgtype.Date        `json:"period_start"`
+	PeriodEnd              pgtype.Date        `json:"period_end"`
+	TotalUnitsPlanted      int32              `json:"total_units_planted"`
+	TotalMaintenanceTasks  int32              `json:"total_maintenance_tasks"`
+	GrossAmountIdr         pgtype.Numeric     `json:"gross_amount_idr"`
+	TransferFeeIdr         pgtype.Numeric     `json:"transfer_fee_idr"`
+	NetDisbursedIdr        pgtype.Numeric     `json:"net_disbursed_idr"`
+	PayoutGatewayProvider  string             `json:"payout_gateway_provider"`
+	ExternalDisbursementID pgtype.Text        `json:"external_disbursement_id"`
+	Status                 PayoutStatus       `json:"status"`
+	FailureReason          pgtype.Text        `json:"failure_reason"`
+	ApprovedAt             pgtype.Timestamptz `json:"approved_at"`
+	DisbursedAt            pgtype.Timestamptz `json:"disbursed_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type OperatorTokens struct {
+	ID             uuid.UUID          `json:"id"`
+	OperatorID     uuid.UUID          `json:"operator_id"`
+	TokenType      TokenTypeEnum      `json:"token_type"`
+	TokenHash      string             `json:"token_hash"`
+	FcmDeviceToken pgtype.Text        `json:"fcm_device_token"`
+	DeviceInfo     pgtype.Text        `json:"device_info"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type OperatorWorkLogs struct {
+	ID                   uuid.UUID          `json:"id"`
+	OperatorID           uuid.UUID          `json:"operator_id"`
+	EnteredByAdminID     pgtype.UUID        `json:"entered_by_admin_id"`
+	ApprovedByOperatorID pgtype.UUID        `json:"approved_by_operator_id"`
+	ProjectID            pgtype.UUID        `json:"project_id"`
+	SpiderFrameID        pgtype.UUID        `json:"spider_frame_id"`
+	CoralFragmentID      pgtype.UUID        `json:"coral_fragment_id"`
+	ServiceRequestID     pgtype.UUID        `json:"service_request_id"`
+	PayoutID             pgtype.UUID        `json:"payout_id"`
+	TaskType             OperatorTaskType   `json:"task_type"`
+	UnitsCompleted       int32              `json:"units_completed"`
+	FeeEarnedIdr         pgtype.Numeric     `json:"fee_earned_idr"`
+	ProofImageUrl        string             `json:"proof_image_url"`
+	VerificationStatus   SubmissionStatus   `json:"verification_status"`
+	WorkDate             pgtype.Timestamptz `json:"work_date"`
+	VerifiedAt           pgtype.Timestamptz `json:"verified_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type PetBoosts struct {
+	ID           uuid.UUID          `json:"id"`
+	UserID       uuid.UUID          `json:"user_id"`
+	PetID        uuid.UUID          `json:"pet_id"`
+	DonationID   pgtype.UUID        `json:"donation_id"`
+	ProductID    pgtype.UUID        `json:"product_id"`
+	BoostType    PetBoostType       `json:"boost_type"`
+	XpMultiplier pgtype.Numeric     `json:"xp_multiplier"`
+	IsActive     bool               `json:"is_active"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 }
 
 type PlatformAdmins struct {
@@ -1696,6 +2170,160 @@ type PlatformAdmins struct {
 	LastLoginAt        pgtype.Timestamptz `json:"last_login_at"`
 	IsActive           bool               `json:"is_active"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type PointLedgers struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	TransactionType PointTxType        `json:"transaction_type"`
+	Amount          int64              `json:"amount"`
+	BalanceAfter    int64              `json:"balance_after"`
+	ReferenceType   string             `json:"reference_type"`
+	ReferenceID     uuid.UUID          `json:"reference_id"`
+	Description     string             `json:"description"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProductPrices struct {
+	ID           uuid.UUID          `json:"id"`
+	ProductID    uuid.UUID          `json:"product_id"`
+	CurrencyCode string             `json:"currency_code"`
+	Amount       pgtype.Numeric     `json:"amount"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectIncidents struct {
+	ID                   uuid.UUID                 `json:"id"`
+	ProjectID            uuid.UUID                 `json:"project_id"`
+	SpiderFrameID        pgtype.UUID               `json:"spider_frame_id"`
+	ReportedByAdminID    pgtype.UUID               `json:"reported_by_admin_id"`
+	ReportedByOperatorID pgtype.UUID               `json:"reported_by_operator_id"`
+	IncidentStatus       EnvironmentalHealthStatus `json:"incident_status"`
+	Title                string                    `json:"title"`
+	Description          string                    `json:"description"`
+	AffectedUnitsCount   int32                     `json:"affected_units_count"`
+	OccurredAt           pgtype.Timestamptz        `json:"occurred_at"`
+	ResolvedAt           pgtype.Timestamptz        `json:"resolved_at"`
+	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
+}
+
+type SpiderFrames struct {
+	ID                    uuid.UUID                 `json:"id"`
+	FrameCode             string                    `json:"frame_code"`
+	CompanyID             pgtype.UUID               `json:"company_id"`
+	SponsorshipInvoiceID  pgtype.UUID               `json:"sponsorship_invoice_id"`
+	ZoneID                uuid.UUID                 `json:"zone_id"`
+	DepthMeters           pgtype.Numeric            `json:"depth_meters"`
+	Latitude              pgtype.Numeric            `json:"latitude"`
+	Longitude             pgtype.Numeric            `json:"longitude"`
+	MaxCapacityFragments  int32                     `json:"max_capacity_fragments"`
+	FragmentsPlanted      int32                     `json:"fragments_planted"`
+	PhysicalHealthStatus  EnvironmentalHealthStatus `json:"physical_health_status"`
+	PlaqueInscriptionText pgtype.Text               `json:"plaque_inscription_text"`
+	PlaqueMaterial        pgtype.Text               `json:"plaque_material"`
+	PlaqueDimensions      pgtype.Text               `json:"plaque_dimensions"`
+	Plaque3dPreviewUrl    pgtype.Text               `json:"plaque_3d_preview_url"`
+	BiofoulingStatus      pgtype.Text               `json:"biofouling_status"`
+	LastCleanedAt         pgtype.Date               `json:"last_cleaned_at"`
+	NextMaintenanceAt     pgtype.Date               `json:"next_maintenance_at"`
+	DeployedAt            pgtype.Date               `json:"deployed_at"`
+	IsActive              bool                      `json:"is_active"`
+	CreatedAt             pgtype.Timestamptz        `json:"created_at"`
+}
+
+type SponsoredAdoptionQuotas struct {
+	ID         uuid.UUID          `json:"id"`
+	CompanyID  uuid.UUID          `json:"company_id"`
+	ContractID uuid.UUID          `json:"contract_id"`
+	ProjectID  uuid.UUID          `json:"project_id"`
+	MissionID  pgtype.UUID        `json:"mission_id"`
+	TotalQuota int32              `json:"total_quota"`
+	UsedQuota  int32              `json:"used_quota"`
+	IsActive   bool               `json:"is_active"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type SubscriptionPlanPrices struct {
+	ID           uuid.UUID          `json:"id"`
+	PlanID       uuid.UUID          `json:"plan_id"`
+	CurrencyCode string             `json:"currency_code"`
+	Amount       pgtype.Numeric     `json:"amount"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type SubscriptionPlans struct {
+	ID              uuid.UUID             `json:"id"`
+	SkuCode         string                `json:"sku_code"`
+	GroupCode       string                `json:"group_code"`
+	Name            string                `json:"name"`
+	Description     string                `json:"description"`
+	PlanType        SubscriptionPlanType  `json:"plan_type"`
+	BillingInterval SubscriptionFrequency `json:"billing_interval"`
+	IntervalCount   int32                 `json:"interval_count"`
+	DurationMonths  pgtype.Int4           `json:"duration_months"`
+	Benefits        []byte                `json:"benefits"`
+	IsActive        bool                  `json:"is_active"`
+	SortOrder       int32                 `json:"sort_order"`
+	CreatedAt       pgtype.Timestamptz    `json:"created_at"`
+}
+
+type SubseaTelemetryLogs struct {
+	ID                      uuid.UUID          `json:"id"`
+	ZoneID                  uuid.UUID          `json:"zone_id"`
+	SpiderFrameID           pgtype.UUID        `json:"spider_frame_id"`
+	RecordedByOperatorID    pgtype.UUID        `json:"recorded_by_operator_id"`
+	EnteredByAdminID        pgtype.UUID        `json:"entered_by_admin_id"`
+	WaterTemperatureCelsius pgtype.Numeric     `json:"water_temperature_celsius"`
+	TemperatureStatus       pgtype.Text        `json:"temperature_status"`
+	SalinityPsu             pgtype.Numeric     `json:"salinity_psu"`
+	VisibilityMeters        pgtype.Numeric     `json:"visibility_meters"`
+	CameraStationCode       pgtype.Text        `json:"camera_station_code"`
+	RecordedAt              pgtype.Timestamptz `json:"recorded_at"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
+type SurveyRecords struct {
+	ID                   uuid.UUID          `json:"id"`
+	ProjectID            pgtype.UUID        `json:"project_id"`
+	SpiderFrameID        pgtype.UUID        `json:"spider_frame_id"`
+	SurveyedByOperatorID pgtype.UUID        `json:"surveyed_by_operator_id"`
+	EnteredByAdminID     pgtype.UUID        `json:"entered_by_admin_id"`
+	SurveyType           string             `json:"survey_type"`
+	IndicatorName        string             `json:"indicator_name"`
+	MeasuredValue        pgtype.Numeric     `json:"measured_value"`
+	Unit                 string             `json:"unit"`
+	RawDataUrl           pgtype.Text        `json:"raw_data_url"`
+	SurveyDate           pgtype.Date        `json:"survey_date"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserDigitalInventories struct {
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	ProductID  uuid.UUID          `json:"product_id"`
+	Quantity   int32              `json:"quantity"`
+	AcquiredAt pgtype.Timestamptz `json:"acquired_at"`
+}
+
+type UserMissionSubmissions struct {
+	ID                uuid.UUID          `json:"id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	MissionID         uuid.UUID          `json:"mission_id"`
+	PetID             pgtype.UUID        `json:"pet_id"`
+	SubmissionDate    pgtype.Date        `json:"submission_date"`
+	ProofImageUrl     pgtype.Text        `json:"proof_image_url"`
+	ImageHash         pgtype.Text        `json:"image_hash"`
+	Status            SubmissionStatus   `json:"status"`
+	CvJobID           pgtype.Text        `json:"cv_job_id"`
+	CvModelVersion    pgtype.Text        `json:"cv_model_version"`
+	CvConfidenceScore pgtype.Numeric     `json:"cv_confidence_score"`
+	CvRawResponse     []byte             `json:"cv_raw_response"`
+	AwardedPoints     int64              `json:"awarded_points"`
+	AwardedXp         int64              `json:"awarded_xp"`
+	RejectionReason   pgtype.Text        `json:"rejection_reason"`
+	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
 }
 
 type UserStreaks struct {
@@ -1739,4 +2367,34 @@ type Users struct {
 	LockedPointsBalance   int64              `json:"locked_points_balance"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type VirtualPets struct {
+	ID                uuid.UUID          `json:"id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	FragmentID        pgtype.UUID        `json:"fragment_id"`
+	EquippedProductID pgtype.UUID        `json:"equipped_product_id"`
+	PetName           string             `json:"pet_name"`
+	PetSpecies        string             `json:"pet_species"`
+	CoralType         string             `json:"coral_type"`
+	GrowthStage       PetGrowthStage     `json:"growth_stage"`
+	HealthPercent     int32              `json:"health_percent"`
+	Level             int32              `json:"level"`
+	ExperiencePoints  int64              `json:"experience_points"`
+	IsPrimary         bool               `json:"is_primary"`
+	LastInteractedAt  pgtype.Timestamptz `json:"last_interacted_at"`
+	AdoptedAt         pgtype.Timestamptz `json:"adopted_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type WebhookEvents struct {
+	ID              uuid.UUID            `json:"id"`
+	Provider        string               `json:"provider"`
+	ExternalEventID string               `json:"external_event_id"`
+	EventType       string               `json:"event_type"`
+	Payload         []byte               `json:"payload"`
+	Status          WebhookProcessStatus `json:"status"`
+	ErrorMessage    pgtype.Text          `json:"error_message"`
+	ProcessedAt     pgtype.Timestamptz   `json:"processed_at"`
+	CreatedAt       pgtype.Timestamptz   `json:"created_at"`
 }
