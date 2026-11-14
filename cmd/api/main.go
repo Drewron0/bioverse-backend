@@ -135,6 +135,8 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 	r.Use(chimiddleware.RealIP)
 	r.Use(middleware.Logger(log))
 	r.Use(middleware.Recoverer(log))
+	r.Use(middleware.SecurityHeaders)
+	r.Use(middleware.BodyLimit(1 << 20)) // 1MB payload limit for DoS mitigation
 	r.Use(middleware.CORSConfig(cfg.App.AllowedOrigins))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
