@@ -102,7 +102,6 @@ paths:
       tags:
         - App Auth
       summary: Authenticate user with email and password
-      description: Validates argon2id password and returns a fresh JWT access token and rotating refresh token.
       requestBody:
         required: true
         content:
@@ -111,13 +110,19 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Successfully authenticated
+          description: Authentication successful
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid credentials format
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
-          description: Invalid email or password
+          description: Incorrect email or password
           content:
             application/problem+json:
               schema:
@@ -127,8 +132,7 @@ paths:
     post:
       tags:
         - App Auth
-      summary: Rotate and refresh authentication tokens
-      description: Validates an existing refresh token, marks it used/revoked, and returns a new token pair. If a revoked token is reused, all tokens for the user family are revoked.
+      summary: Rotate refresh token and issue new access token
       requestBody:
         required: true
         content:
@@ -137,7 +141,7 @@ paths:
               $ref: '#/components/schemas/RefreshRequest'
       responses:
         '200':
-          description: Tokens rotated successfully
+          description: New token pair issued
           content:
             application/json:
               schema:
@@ -169,6 +173,402 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/conservation/projects:
+    get:
+      tags:
+        - Conservation
+      summary: List all active conservation restoration projects
+      responses:
+        '200':
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConservationProject'
+
+  /v1/app/conservation/projects/{id}:
+    get:
+      tags:
+        - Conservation
+      summary: Get conservation project details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConservationProject'
+        '404':
+          description: Project not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/conservation/corals/my:
+    get:
+      tags:
+        - Conservation
+      summary: List adopted coral fragments belonging to the authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User coral fragments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  corals:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdoptedCoral'
+
+  /v1/app/catalog/products:
+    get:
+      tags:
+        - Catalog
+      summary: List digital shop products (Streak Freeze, XP Boost, Skins)
+      responses:
+        '200':
+          description: Products list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DigitalProduct'
+
+  /v1/app/catalog/plans:
+    get:
+      tags:
+        - Catalog
+      summary: List subscription maintenance plans (BioVerse Plus)
+      responses:
+        '200':
+          description: Subscription plans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SubscriptionPlan'
+
+  /v1/app/donations/checkout:
+    post:
+      tags:
+        - Donations
+      summary: Create donation checkout with atomic idempotency and points locking
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DonationCheckoutRequest'
+      responses:
+        '201':
+          description: Checkout created with payment instructions (QRIS / VA)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationCheckoutResponse'
+        '403':
+          description: Coral-First Gating failed (Bio-Shield requested without owning a coral)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/donations/{id}:
+    get:
+      tags:
+        - Donations
+      summary: Get donation payment status and countdown
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Donation record details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationCheckoutResponse'
+
+  /v1/app/donations/my:
+    get:
+      tags:
+        - Donations
+      summary: Get authenticated user donation history
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of user donations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  donations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DonationCheckoutResponse'
+
+  /v1/webhooks/xendit/simulate-paid:
+    post:
+      tags:
+        - Donations
+      summary: Simulate payment settlement webhook (Sandbox & Testing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - donation_id
+              properties:
+                donation_id:
+                  type: string
+                  format: uuid
+                target_pet_id:
+                  type: string
+                  format: uuid
+                coral_nickname:
+                  type: string
+      responses:
+        '200':
+          description: Payment processed, spider frame assigned, and fragments allocated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: paid
+
+  /v1/app/pets:
+    get:
+      tags:
+        - Gamification
+      summary: List virtual pets owned by user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User pets list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VirtualPet'
+    post:
+      tags:
+        - Gamification
+      summary: Adopt a new virtual pet companion
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdoptPetRequest'
+      responses:
+        '201':
+          description: Pet companion adopted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VirtualPet'
+
+  /v1/app/pets/{id}:
+    get:
+      tags:
+        - Gamification
+      summary: Get virtual pet details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Virtual pet details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VirtualPet'
+
+  /v1/app/pets/{id}/interact:
+    post:
+      tags:
+        - Gamification
+      summary: Feed / interact with virtual pet to restore health and gain XP
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Interaction updated pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VirtualPet'
+
+  /v1/app/missions:
+    get:
+      tags:
+        - Gamification
+      summary: List active eco-missions
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Active eco-missions list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  missions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EcoMission'
+
+  /v1/app/missions/{id}/submit:
+    post:
+      tags:
+        - Gamification
+      summary: Submit camera proof for an eco-mission with Computer Vision verification
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - proof_image_url
+              properties:
+                proof_image_url:
+                  type: string
+                  format: uri
+                  example: https://storage.bioverse.id/proofs/tumbler.jpg
+                target_pet_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Mission verified, XP and Points awarded, streak updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionSubmissionResult'
+        '409':
+          description: Daily mission already submitted today
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /v1/app/streaks:
+    get:
+      tags:
+        - Gamification
+      summary: Get current streak and freeze status
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Streak information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStreak'
+
+  /v1/app/leaderboard:
+    get:
+      tags:
+        - Gamification
+      summary: Get global user leaderboard ranking
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Leaderboard rankings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leaderboard:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LeaderboardEntry'
 
 components:
   securitySchemes:
@@ -252,7 +652,6 @@ components:
           example: Bearer
         expires_in:
           type: integer
-          description: Lifetime of access_token in seconds (e.g. 900 for 15m)
           example: 900
         user:
           $ref: '#/components/schemas/UserProfileResponse'
@@ -271,7 +670,6 @@ components:
         id:
           type: string
           format: uuid
-          example: 0193297a-96e0-7988-9271-e0e649ce4301
         full_name:
           type: string
           example: Budi Pratama
@@ -286,10 +684,338 @@ components:
           example: USD
         points_balance:
           type: integer
-          example: 0
+          example: 120
         current_streak:
           type: integer
+          example: 3
+
+    ConservationProject:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Biorock Coral Restoration Pemuteran
+        description:
+          type: string
+        category:
+          type: string
+          example: coral
+        species_or_type_name:
+          type: string
+          example: Acropora & Pocillopora
+        image_url:
+          type: string
+        price_per_unit_money:
+          type: string
+          example: '3.20'
+        currency_code:
+          type: string
+          example: USD
+        target_units:
+          type: integer
+          example: 1500
+        funded_units_count:
+          type: integer
+          example: 420
+        planted_units_count:
+          type: integer
+          example: 300
+        surviving_units_count:
+          type: integer
+          example: 285
+
+    AdoptedCoral:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fragment_code:
+          type: string
+          example: CR-BALI-001-01
+        frame_code:
+          type: string
+          example: SF-BALI-001
+        nickname:
+          type: string
+          example: Coral Acep
+        lifecycle_status:
+          type: string
+          example: planted
+        health_percent:
+          type: integer
+          example: 100
+        planted_at:
+          type: string
+          format: date-time
+
+    DigitalProduct:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku_code:
+          type: string
+          example: STREAK_FREEZE_1X
+        name:
+          type: string
+          example: Streak Freeze
+        description:
+          type: string
+        item_type:
+          type: string
+          example: streak_freeze
+        price_points:
+          type: integer
+          example: 150
+        preview_asset_url:
+          type: string
+
+    SubscriptionPlan:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku_code:
+          type: string
+          example: BIOVERSE_PLUS_MONTHLY
+        name:
+          type: string
+          example: BioVerse Plus Monthly
+        description:
+          type: string
+        billing_interval:
+          type: string
+          example: monthly
+
+    DonationCheckoutRequest:
+      type: object
+      required:
+        - project_id
+        - unit_quantity
+        - payment_method
+      properties:
+        idempotency_key:
+          type: string
+          format: uuid
+          example: 0193297a-96e0-7988-9271-e0e649ce4999
+        project_id:
+          type: string
+          format: uuid
+        unit_quantity:
+          type: integer
+          minimum: 1
+          example: 1
+        include_bio_shield:
+          type: boolean
+          default: false
+        target_pet_id:
+          type: string
+          format: uuid
+        coral_nickname:
+          type: string
+          example: Budi's Coral
+        points_to_use:
+          type: integer
+          default: 0
+        payment_method:
+          type: string
+          enum: [qris, bca_va, mandiri_va, bri_va, bni_va, ewallet]
+          example: qris
+
+    DonationCheckoutResponse:
+      type: object
+      properties:
+        donation_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+        gross_project_value:
+          type: string
+          example: '3.20'
+        money_amount_paid:
+          type: string
+          example: '3.20'
+        currency_code:
+          type: string
+          example: USD
+        settlement_amount:
+          type: string
+          example: '51200.00'
+        settlement_currency:
+          type: string
+          example: IDR
+        points_used:
+          type: integer
           example: 0
+        points_discount:
+          type: string
+          example: '0.00'
+        payment_method:
+          type: string
+          example: qris
+        qris_payload:
+          type: string
+        va_number:
+          type: string
+        bank_code:
+          type: string
+        payment_status:
+          type: string
+          example: pending
+        expired_at:
+          type: string
+          format: date-time
+
+    VirtualPet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        pet_name:
+          type: string
+          example: Acep
+        pet_species:
+          type: string
+          example: turtle
+        coral_type:
+          type: string
+          example: Acropora
+        growth_stage:
+          type: string
+          example: hatchling
+        health_percent:
+          type: integer
+          example: 100
+        level:
+          type: integer
+          example: 1
+        experience_points:
+          type: integer
+          example: 35
+        is_primary:
+          type: boolean
+          example: true
+
+    AdoptPetRequest:
+      type: object
+      required:
+        - pet_name
+        - pet_species
+        - coral_type
+      properties:
+        pet_name:
+          type: string
+          example: Acep
+        pet_species:
+          type: string
+          example: turtle
+        coral_type:
+          type: string
+          example: Acropora
+        fragment_id:
+          type: string
+          format: uuid
+        make_primary:
+          type: boolean
+          default: false
+
+    EcoMission:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Reusable Tumbler Snap
+        description:
+          type: string
+        category:
+          type: string
+          example: lifestyle
+        difficulty:
+          type: string
+          example: easy
+        points_reward:
+          type: integer
+          example: 50
+        xp_reward:
+          type: integer
+          example: 25
+        requires_camera_proof:
+          type: boolean
+          example: true
+
+    MissionSubmissionResult:
+      type: object
+      properties:
+        submission_id:
+          type: string
+          format: uuid
+        mission_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [verified, rejected, pending]
+          example: verified
+        awarded_points:
+          type: integer
+          example: 50
+        awarded_xp:
+          type: integer
+          example: 25
+        current_streak:
+          type: integer
+          example: 1
+        verified_at:
+          type: string
+          format: date-time
+        rejection_notes:
+          type: string
+
+    UserStreak:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        current_streak:
+          type: integer
+          example: 3
+        longest_streak:
+          type: integer
+          example: 7
+        last_streak_date:
+          type: string
+          format: date
+          example: '2026-11-14'
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+          example: Budi Pratama
+        avatar_url:
+          type: string
+        points_balance:
+          type: integer
+          example: 450
+        rank_position:
+          type: integer
+          example: 1
 
     HealthResponse:
       type: object

@@ -12,6 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Drewron01/bioverse-backend/internal/catalog"
+	"github.com/Drewron01/bioverse-backend/internal/conservation"
+	"github.com/Drewron01/bioverse-backend/internal/donation"
+	"github.com/Drewron01/bioverse-backend/internal/gamification"
 	"github.com/Drewron01/bioverse-backend/internal/identity"
 	"github.com/Drewron01/bioverse-backend/internal/platform/config"
 	"github.com/Drewron01/bioverse-backend/internal/platform/database"
@@ -146,10 +150,27 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 
 	if db != nil {
 		queries := store.New(db)
+		authMiddleware := identity.AuthMiddleware(cfg.Auth.JWTSecret)
+
 		identityService := identity.NewService(db, queries, cfg)
 		identityHandler := identity.NewHandler(identityService)
-		authMiddleware := identity.AuthMiddleware(cfg.Auth.JWTSecret)
 		identityHandler.RegisterRoutes(r, authMiddleware)
+
+		conservationService := conservation.NewService(db, queries)
+		conservationHandler := conservation.NewHandler(conservationService)
+		conservationHandler.RegisterRoutes(r, authMiddleware)
+
+		catalogService := catalog.NewService(db, queries)
+		catalogHandler := catalog.NewHandler(catalogService)
+		catalogHandler.RegisterRoutes(r)
+
+		donationService := donation.NewService(db, queries, conservationService)
+		donationHandler := donation.NewHandler(donationService)
+		donationHandler.RegisterRoutes(r, authMiddleware)
+
+		gamificationService := gamification.NewService(db, queries, nil)
+		gamificationHandler := gamification.NewHandler(gamificationService)
+		gamificationHandler.RegisterRoutes(r, authMiddleware)
 	}
 
 	return r
