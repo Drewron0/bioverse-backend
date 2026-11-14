@@ -127,3 +127,37 @@ func (s *Service) AllocateFragments(
 func (s *Service) ListUserAdoptedCorals(ctx context.Context, userID uuid.UUID) ([]store.ListCoralFragmentsByUserIDRow, error) {
 	return s.store.ListCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: userID, Valid: true})
 }
+
+// GetCoralFragment returns details for a single coral fragment.
+func (s *Service) GetCoralFragment(ctx context.Context, id uuid.UUID) (*store.GetCoralFragmentByIDRow, error) {
+	frag, err := s.store.GetCoralFragmentByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("coral fragment not found")
+		}
+		return nil, fmt.Errorf("failed to query coral fragment: %w", err)
+	}
+	return &frag, nil
+}
+
+// ListCoralMilestones returns photographic monitoring milestones for a coral fragment.
+func (s *Service) ListCoralMilestones(ctx context.Context, fragmentID uuid.UUID) ([]store.ListCoralMilestonesByFragmentIDRow, error) {
+	return s.store.ListCoralMilestonesByFragmentID(ctx, pgtype.UUID{Bytes: fragmentID, Valid: true})
+}
+
+// GetImpactSummary retrieves platform-wide restoration metrics.
+func (s *Service) GetImpactSummary(ctx context.Context) (*store.GetPlatformImpactSummaryRow, error) {
+	res, err := s.store.GetPlatformImpactSummary(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get impact summary: %w", err)
+	}
+	return &res, nil
+}
+
+// ListNewsArticles retrieves recent news articles.
+func (s *Service) ListNewsArticles(ctx context.Context, limit int32) ([]store.NewsArticles, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.store.ListNewsArticles(ctx, limit)
+}
