@@ -1,0 +1,35 @@
+# Binaries and build artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts and coverage
+*.out
+*.test
+coverage.html
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker and local storage data
+deploy/data/
+tmp/
+
+# Dependency directories
+vendor/

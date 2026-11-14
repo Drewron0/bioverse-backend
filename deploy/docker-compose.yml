@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bioverse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-bioverse}
+      POSTGRES_USER: ${DB_USER:-bioverse}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bioverse_dev}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - bioverse_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bioverse} -d ${DB_NAME:-bioverse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: bioverse-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-bioverse_minio}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-bioverse_minio_secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - bioverse_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: bioverse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set local http://minio:9000 ${STORAGE_ACCESS_KEY:-bioverse_minio} ${STORAGE_SECRET_KEY:-bioverse_minio_secret};
+      /usr/bin/mc mb --ignore-existing local/${STORAGE_BUCKET_NAME:-bioverse-media};
+      /usr/bin/mc anonymous set download local/${STORAGE_BUCKET_NAME:-bioverse-media};
+      exit 0;
+      "
+
+volumes:
+  bioverse_pgdata:
+    driver: local
+  bioverse_miniodata:
+    driver: local

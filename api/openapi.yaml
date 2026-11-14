@@ -1,0 +1,148 @@
+openapi: 3.1.0
+info:
+  title: BioVerse API
+  description: >
+    BioVerse is a gamified Ridge-to-Reef ecosystem restoration platform API backend.
+    Powers B2C Flutter mobile app, B2B web dashboard, and Admin back office.
+  version: 1.0.0
+  contact:
+    name: BioVerse Engineering Team
+    email: dev@bioverse.id
+
+servers:
+  - url: http://localhost:8080
+    description: Local development environment
+  - url: https://api.staging.bioverse.id
+    description: Staging environment
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness health check
+      description: Returns 200 OK if the HTTP server process is running.
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /livez:
+    get:
+      summary: Kubernetes liveness probe
+      responses:
+        '200':
+          description: Process is responsive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /v1/health:
+    get:
+      summary: Readiness health check
+      description: Returns health status of the application and internal dependencies (database).
+      responses:
+        '200':
+          description: All critical systems healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Degraded system state (e.g. database unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - app
+        - uptime
+        - timestamp
+        - services
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          example: ok
+        app:
+          type: string
+          example: BioVerse Backend
+        uptime:
+          type: string
+          example: 45m20s
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-11-14T15:00:00Z'
+        services:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            database: connected
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - code
+      properties:
+        type:
+          type: string
+          format: uri
+          example: about:blank
+        title:
+          type: string
+          example: Bad Request
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: Invalid request parameters provided.
+        instance:
+          type: string
+          example: /v1/app/auth/register
+        code:
+          type: string
+          example: BAD_REQUEST
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            email: Must be a valid email address.
+
+    Money:
+      type: object
+      required:
+        - amount
+        - currency
+      properties:
+        amount:
+          type: string
+          description: Decimal string representation of monetary amount to avoid floating-point loss.
+          example: "3.20"
+        currency:
+          type: string
+          description: ISO 4217 three-letter currency code.
+          example: "USD"
