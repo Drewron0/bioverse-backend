@@ -186,6 +186,7 @@ type RecordMediaEvidenceInput struct {
 	Longitude       decimal.Decimal
 	DepthMeters     decimal.Decimal
 	CapturedAt      time.Time
+	Notes           string
 }
 
 // RecordMediaEvidence stores milestone photo updates (months 1, 3, 6).
@@ -204,6 +205,11 @@ func (s *Service) RecordMediaEvidence(ctx context.Context, in RecordMediaEvidenc
 		fragID = pgtype.UUID{Bytes: *in.CoralFragmentID, Valid: true}
 	}
 
+	subtitle := fmt.Sprintf("Milestone Month %d Growth Update", in.MilestoneMonth)
+	if in.Notes != "" {
+		subtitle = in.Notes
+	}
+
 	ev, err := s.store.CreateMediaEvidence(ctx, store.CreateMediaEvidenceParams{
 		ID:                    evID,
 		ProjectID:             pgtype.UUID{Bytes: in.ProjectID, Valid: true},
@@ -215,7 +221,7 @@ func (s *Service) RecordMediaEvidence(ctx context.Context, in RecordMediaEvidenc
 		MediaType:             store.EvidenceMediaTypePhoto,
 		MilestoneMonth:        pgtype.Int4{Int32: in.MilestoneMonth, Valid: true},
 		MilestoneTitle:        pgtype.Text{String: in.MilestoneTitle, Valid: true},
-		SubtitleMetrics:       pgtype.Text{String: fmt.Sprintf("Milestone Month %d Growth Update", in.MilestoneMonth), Valid: true},
+		SubtitleMetrics:       pgtype.Text{String: subtitle, Valid: true},
 		MediaUrl:              in.MediaURL,
 		GpsLatitude:           decimalutil.ToNumeric(in.Latitude),
 		GpsLongitude:          decimalutil.ToNumeric(in.Longitude),

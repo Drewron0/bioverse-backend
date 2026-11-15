@@ -279,6 +279,24 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 		Valid: true,
 	}
 
+	// Default to primary pet if targetPetID is not provided
+	if targetPetID == nil {
+		pets, err := s.store.ListVirtualPetsByUserID(ctx, userID)
+		if err == nil && len(pets) > 0 {
+			for _, p := range pets {
+				if p.IsPrimary {
+					petIDCopy := p.ID
+					targetPetID = &petIDCopy
+					break
+				}
+			}
+			if targetPetID == nil {
+				petIDCopy := pets[0].ID
+				targetPetID = &petIDCopy
+			}
+		}
+	}
+
 	// Check if already submitted today
 	_, err = s.store.GetTodaySubmissionForMission(ctx, store.GetTodaySubmissionForMissionParams{
 		UserID:         userID,

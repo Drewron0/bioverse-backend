@@ -27,8 +27,14 @@ var (
 	ErrTokenRevoked = errors.New("token has been revoked")
 	// ErrTokenExpired indicates a refresh token has expired.
 	ErrTokenExpired = errors.New("token has expired")
+	// ErrInvalidRefreshToken indicates invalid refresh token.
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	// ErrRefreshTokenExpired indicates expired refresh token.
+	ErrRefreshTokenExpired = ErrTokenExpired
 	// ErrUserNotFound indicates the user does not exist.
 	ErrUserNotFound = errors.New("user not found")
+	// ErrMfaRequired indicates admin requires TOTP MFA verification.
+	ErrMfaRequired = errors.New("mfa totp code required")
 )
 
 // RegisterInput represents the payload required to register a new user.
@@ -709,6 +715,10 @@ func (s *Service) AdminLogin(ctx context.Context, email, password, totpCode stri
 		return nil, ErrInvalidCredentials
 	}
 
+	if admin.MfaEnabled && totpCode == "" {
+		return nil, ErrMfaRequired
+	}
+
 	accessToken, err := crypto.GenerateAccessToken(admin.ID, admin.Email, s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign admin access token: %w", err)
@@ -735,4 +745,65 @@ func (s *Service) AdminLogin(ctx context.Context, email, password, totpCode stri
 		ExpiresIn:    int(s.config.Auth.AccessExpiry.Seconds()),
 		AdminRole:    string(admin.Role),
 	}, nil
+}
+
+// AdminRefresh rotates an admin refresh token and issues a new access token.
+func (s *Service) AdminRefresh(ctx context.Context, rawRefreshToken string) (*AdminAuthResult, error) {
+	if rawRefreshToken == "" {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	tokenHash := crypto.HashToken(rawRefreshToken)
+	tokenRecord, err := s.store.GetAdminTokenByHash(ctx, store.GetAdminTokenByHashParams{
+		TokenHash: tokenHash,
+		TokenType: store.TokenTypeEnumRefresh,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidRefreshToken
+		}
+		return nil, fmt.Errorf("failed to lookup admin token: %w", err)
+	}
+
+	if time.Now().UTC().After(tokenRecord.ExpiresAt.Time) {
+		return nil, ErrRefreshTokenExpired
+	}
+
+	_ = s.store.MarkAdminTokenUsed(ctx, tokenRecord.ID)
+
+	accessToken, err := crypto.GenerateAccessToken(tokenRecord.AdminID, tokenRecord.Email, s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign admin token: %w", err)
+	}
+
+	newRawRefresh, _ := crypto.GenerateRandomString(32)
+	newRefreshHash := crypto.HashToken(newRawRefresh)
+	newTokenID, _ := uuid.NewV7()
+
+	_, err = s.store.CreateAdminToken(ctx, store.CreateAdminTokenParams{
+		ID:        newTokenID,
+		AdminID:   tokenRecord.AdminID,
+		TokenType: store.TokenTypeEnumRefresh,
+		TokenHash: newRefreshHash,
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(s.config.Auth.RefreshExpiry), Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to store rotated admin refresh token: %w", err)
+	}
+
+	return &AdminAuthResult{
+		AccessToken:  accessToken,
+		RefreshToken: newRawRefresh,
+		ExpiresIn:    int(s.config.Auth.AccessExpiry.Seconds()),
+		AdminRole:    string(tokenRecord.Role),
+	}, nil
+}
+
+// AdminLogout revokes an active admin refresh token.
+func (s *Service) AdminLogout(ctx context.Context, rawRefreshToken string) error {
+	if rawRefreshToken == "" {
+		return nil
+	}
+	tokenHash := crypto.HashToken(rawRefreshToken)
+	return s.store.RevokeAdminToken(ctx, tokenHash)
 }

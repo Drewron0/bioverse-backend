@@ -113,3 +113,21 @@ INSERT INTO admin_tokens (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
 ) RETURNING id, admin_id, token_type, token_hash, expires_at;
+
+-- name: GetAdminTokenByHash :one
+SELECT at.id, at.admin_id, at.token_type, at.token_hash, at.expires_at, at.used_at, at.revoked_at,
+       pa.email, pa.full_name, pa.role, pa.is_active
+FROM admin_tokens at
+JOIN platform_admins pa ON at.admin_id = pa.id
+WHERE at.token_hash = $1 AND at.token_type = $2 AND at.revoked_at IS NULL AND at.used_at IS NULL
+LIMIT 1;
+
+-- name: RevokeAdminToken :exec
+UPDATE admin_tokens
+SET revoked_at = NOW()
+WHERE token_hash = $1;
+
+-- name: MarkAdminTokenUsed :exec
+UPDATE admin_tokens
+SET used_at = NOW()
+WHERE id = $1;

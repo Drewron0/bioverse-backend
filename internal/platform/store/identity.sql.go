@@ -192,6 +192,53 @@ func (q *Queries) CreateUserToken(ctx context.Context, arg CreateUserTokenParams
 	return i, err
 }
 
+const getAdminTokenByHash = `-- name: GetAdminTokenByHash :one
+SELECT at.id, at.admin_id, at.token_type, at.token_hash, at.expires_at, at.used_at, at.revoked_at,
+       pa.email, pa.full_name, pa.role, pa.is_active
+FROM admin_tokens at
+JOIN platform_admins pa ON at.admin_id = pa.id
+WHERE at.token_hash = $1 AND at.token_type = $2 AND at.revoked_at IS NULL AND at.used_at IS NULL
+LIMIT 1
+`
+
+type GetAdminTokenByHashParams struct {
+	TokenHash string        `json:"token_hash"`
+	TokenType TokenTypeEnum `json:"token_type"`
+}
+
+type GetAdminTokenByHashRow struct {
+	ID        uuid.UUID          `json:"id"`
+	AdminID   uuid.UUID          `json:"admin_id"`
+	TokenType TokenTypeEnum      `json:"token_type"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	Email     string             `json:"email"`
+	FullName  string             `json:"full_name"`
+	Role      AdminRole          `json:"role"`
+	IsActive  bool               `json:"is_active"`
+}
+
+func (q *Queries) GetAdminTokenByHash(ctx context.Context, arg GetAdminTokenByHashParams) (GetAdminTokenByHashRow, error) {
+	row := q.db.QueryRow(ctx, getAdminTokenByHash, arg.TokenHash, arg.TokenType)
+	var i GetAdminTokenByHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.AdminID,
+		&i.TokenType,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.RevokedAt,
+		&i.Email,
+		&i.FullName,
+		&i.Role,
+		&i.IsActive,
+	)
+	return i, err
+}
+
 const getPlatformAdminByEmail = `-- name: GetPlatformAdminByEmail :one
 SELECT id, full_name, email, password_hash, role, mfa_enabled, mfa_secret_encrypted, 
        mfa_verified_at, failed_login_count, locked_until, last_login_at, is_active, created_at
@@ -345,6 +392,17 @@ func (q *Queries) GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHash
 	return i, err
 }
 
+const markAdminTokenUsed = `-- name: MarkAdminTokenUsed :exec
+UPDATE admin_tokens
+SET used_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) MarkAdminTokenUsed(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markAdminTokenUsed, id)
+	return err
+}
+
 const markUserTokenUsed = `-- name: MarkUserTokenUsed :exec
 UPDATE user_tokens
 SET used_at = NOW()
@@ -353,6 +411,17 @@ WHERE id = $1
 
 func (q *Queries) MarkUserTokenUsed(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markUserTokenUsed, id)
+	return err
+}
+
+const revokeAdminToken = `-- name: RevokeAdminToken :exec
+UPDATE admin_tokens
+SET revoked_at = NOW()
+WHERE token_hash = $1
+`
+
+func (q *Queries) RevokeAdminToken(ctx context.Context, tokenHash string) error {
+	_, err := q.db.Exec(ctx, revokeAdminToken, tokenHash)
 	return err
 }
 

@@ -40,6 +40,7 @@ type Querier interface {
 	CreditUserPoints(ctx context.Context, arg CreditUserPointsParams) (CreditUserPointsRow, error)
 	DecrementUserInventoryItem(ctx context.Context, arg DecrementUserInventoryItemParams) (UserDigitalInventories, error)
 	EquipVirtualPetProduct(ctx context.Context, arg EquipVirtualPetProductParams) (VirtualPets, error)
+	GetAdminTokenByHash(ctx context.Context, arg GetAdminTokenByHashParams) (GetAdminTokenByHashRow, error)
 	GetCompanyByID(ctx context.Context, id uuid.UUID) (Companies, error)
 	GetConservationProjectByID(ctx context.Context, id uuid.UUID) (GetConservationProjectByIDRow, error)
 	GetCoralFragmentByID(ctx context.Context, id uuid.UUID) (GetCoralFragmentByIDRow, error)
@@ -97,8 +98,10 @@ type Querier interface {
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID) ([]ListUserSubscriptionsRow, error)
 	ListVirtualPetsByUserID(ctx context.Context, userID uuid.UUID) ([]ListVirtualPetsByUserIDRow, error)
 	LockUserPoints(ctx context.Context, arg LockUserPointsParams) (LockUserPointsRow, error)
+	MarkAdminTokenUsed(ctx context.Context, id uuid.UUID) error
 	MarkDonationExpired(ctx context.Context, id uuid.UUID) (Donations, error)
 	MarkUserTokenUsed(ctx context.Context, id uuid.UUID) error
+	RevokeAdminToken(ctx context.Context, tokenHash string) error
 	RevokeAllUserTokensForUser(ctx context.Context, arg RevokeAllUserTokensForUserParams) error
 	RevokeUserToken(ctx context.Context, id uuid.UUID) error
 	SetPrimaryPet(ctx context.Context, arg SetPrimaryPetParams) (VirtualPets, error)

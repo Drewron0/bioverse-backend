@@ -137,6 +137,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '409':
           $ref: '#/components/responses/ConflictError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -165,6 +167,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -193,6 +197,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -221,6 +227,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -247,6 +255,8 @@ paths:
                 $ref: '#/components/schemas/StandardSuccessResponse'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -275,6 +285,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -301,6 +313,8 @@ paths:
                 $ref: '#/components/schemas/StandardSuccessResponse'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -378,6 +392,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -407,6 +423,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -436,6 +454,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -456,6 +476,8 @@ paths:
                 $ref: '#/components/schemas/ImpactSummary'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -483,6 +505,8 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
             default: 10
       responses:
         '200':
@@ -493,6 +517,8 @@ paths:
                 $ref: '#/components/schemas/PaginatedNews'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -527,6 +553,8 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
             default: 20
       responses:
         '200':
@@ -537,6 +565,8 @@ paths:
                 $ref: '#/components/schemas/PaginatedProjects'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -590,6 +620,8 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
             default: 20
       responses:
         '200':
@@ -675,6 +707,8 @@ paths:
       description: >-
         Initiates a single donation checkout with display in USD and settlement in IDR via Xendit.
         Supports coral adoption, tree planting, and dedicated Bio-Shield add-on checkout.
+        A request with the same Idempotency-Key and identical body returns the original response.
+        A request with the same Idempotency-Key but different payload returns 409 Conflict with code: IDEMPOTENCY_KEY_REUSED.
       operationId: createDonationCheckout
       security:
         - BearerAuth: []
@@ -711,6 +745,8 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           $ref: '#/components/responses/ConflictError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -776,6 +812,8 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
             default: 20
       responses:
         '200':
@@ -836,6 +874,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -968,6 +1008,8 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
             default: 10
       responses:
         '200':
@@ -1021,6 +1063,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1109,6 +1153,8 @@ paths:
           required: false
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
             default: 50
       responses:
         '200':
@@ -1119,6 +1165,8 @@ paths:
                 $ref: '#/components/schemas/LeaderboardResponse'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1179,6 +1227,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1208,6 +1258,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1253,6 +1305,8 @@ paths:
                   $ref: '#/components/schemas/SubscriptionPlan'
         '400':
           $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1290,6 +1344,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1414,7 +1470,7 @@ paths:
       tags:
         - Admin Auth
       summary: Admin console login with MFA (TOTP)
-      description: Authenticates platform administrators with password and optional TOTP second factor.
+      description: "Authenticates platform administrators with password and optional TOTP second factor. Returns 401 Unauthorized with code: MFA_REQUIRED when totp_code is missing or invalid."
       operationId: adminLogin
       security: []
       requestBody:
@@ -1434,6 +1490,88 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/auth/refresh:
+    post:
+      tags:
+        - Admin Auth
+      summary: Refresh admin session token
+      description: Exchanges a valid admin refresh token for a newly signed admin access token.
+      operationId: adminRefreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Admin token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/auth/logout:
+    post:
+      tags:
+        - Admin Auth
+      summary: Admin logout
+      description: Revokes active admin session and invalidates refresh token.
+      operationId: adminLogout
+      security:
+        - AdminBearerAuth: []
+      responses:
+        '200':
+          description: Admin session revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/uploads/presign:
+    post:
+      tags:
+        - Admin Field Operations
+      summary: Presign upload for administrative media and field evidence
+      description: Returns an upload authorization URL and S3 object key for administrative photo evidence.
+      operationId: requestAdminPresignedUpload
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminPresignedUploadRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1858,6 +1996,8 @@ paths:
           $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1907,6 +2047,17 @@ components:
             $ref: '#/components/schemas/ProblemDetails'
     InternalServerError:
       description: Internal server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    TooManyRequestsError:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds before retrying
       content:
         application/problem+json:
           schema:
@@ -2203,6 +2354,26 @@ components:
         - pending_data
       example: compliant
 
+    IapStoreType:
+      type: string
+      enum: [apple_app_store, google_play]
+      example: google_play
+
+    OperatorTaskType:
+      type: string
+      enum: [frame_installation, planting, replanting, maintenance_cleaning, monitoring_photo, survey]
+      example: planting
+
+    OperatorRole:
+      type: string
+      enum: [diver, planter, site_manager]
+      example: diver
+
+    SubscriptionFrequency:
+      type: string
+      enum: [weekly, monthly, yearly]
+      example: monthly
+
     CurrencyPrice:
       type: object
       required:
@@ -2490,7 +2661,7 @@ components:
           example: cZ7wX9Y...
         device_type:
           type: string
-          enum: [android, ios, web]
+          enum: [ios, android]
           example: android
 
     PresignedUploadRequest:
@@ -2498,6 +2669,7 @@ components:
       required:
         - file_name
         - content_type
+        - size_bytes
         - purpose
       properties:
         file_name:
@@ -2505,11 +2677,42 @@ components:
           example: proof_beach_cleanup.jpg
         content_type:
           type: string
+          enum: [image/jpeg, image/png, image/webp]
           example: image/jpeg
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+          example: 1024000
         purpose:
           type: string
-          enum: [avatar, mission_proof, field_evidence]
+          enum: [avatar, mission_proof]
           example: mission_proof
+
+    AdminPresignedUploadRequest:
+      type: object
+      required:
+        - file_name
+        - content_type
+        - size_bytes
+        - purpose
+      properties:
+        file_name:
+          type: string
+          example: coral_milestone_m1.jpg
+        content_type:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+          example: image/jpeg
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+          example: 2450000
+        purpose:
+          type: string
+          enum: [field_evidence, content_asset]
+          example: field_evidence
 
     PresignedUploadResponse:
       type: object
@@ -2517,6 +2720,9 @@ components:
         - upload_url
         - object_key
         - expires_in_seconds
+        - method
+        - headers
+        - max_size_bytes
       properties:
         upload_url:
           type: string
@@ -2527,6 +2733,19 @@ components:
         expires_in_seconds:
           type: integer
           example: 900
+        method:
+          type: string
+          enum: [PUT]
+          example: PUT
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            Content-Type: image/jpeg
+        max_size_bytes:
+          type: integer
+          example: 10485760
 
     ImpactSummary:
       type: object
@@ -3113,7 +3332,6 @@ components:
         - instructions
         - points_reward
         - xp_reward
-        - category
       properties:
         id:
           type: string
@@ -3135,6 +3353,7 @@ components:
           example: 75
         category:
           type: string
+          nullable: true
           example: waste_reduction
         difficulty:
           type: string
@@ -3162,6 +3381,10 @@ components:
           type: string
           description: S3 object key obtained via /v1/app/uploads/presign
           example: mission_proofs/01a1d9e4-b3c4-7e54-8795-192296827d75.jpg
+        pet_id:
+          type: string
+          format: uuid
+          description: Recipient companion pet for XP rewards. Defaults to user primary pet.
 
     MissionSubmissionReceipt:
       type: object
@@ -3364,9 +3587,7 @@ components:
           type: string
           format: uuid
         store_provider:
-          type: string
-          enum: [apple_app_store, google_play]
-          example: google_play
+          $ref: '#/components/schemas/IapStoreType'
         receipt_payload:
           type: string
           description: Base64 or JSON token issued by app store
@@ -3423,9 +3644,7 @@ components:
           type: string
           example: Reef Guardian Monthly
         billing_interval:
-          type: string
-          enum: [weekly, monthly, yearly]
-          example: monthly
+          $ref: '#/components/schemas/SubscriptionFrequency'
         prices:
           type: array
           items:
@@ -3458,9 +3677,7 @@ components:
           minimum: 1
           default: 1
         payment_method_type:
-          type: string
-          enum: [card, ewallet]
-          example: card
+          $ref: '#/components/schemas/PaymentMethodType'
 
     SubscriptionDetail:
       type: object
@@ -3481,8 +3698,7 @@ components:
           type: string
           example: Reef Guardian Monthly
         billing_interval:
-          type: string
-          example: monthly
+          $ref: '#/components/schemas/SubscriptionFrequency'
         authorization_url:
           type: string
           nullable: true
@@ -3525,9 +3741,7 @@ components:
           format: email
           example: diver.wayan@bioverse.id
         operator_role:
-          type: string
-          enum: [diver, planter, site_manager]
-          example: diver
+          $ref: '#/components/schemas/OperatorRole'
         national_id_nik:
           type: string
           minLength: 16
@@ -3575,6 +3789,7 @@ components:
         - task_type
         - units_completed
         - proof_object_key
+        - work_date
       properties:
         operator_id:
           type: string
@@ -3587,9 +3802,7 @@ components:
           format: uuid
           nullable: true
         task_type:
-          type: string
-          enum: [frame_installation, planting, replanting, maintenance_cleaning, monitoring_photo, survey]
-          example: planting
+          $ref: '#/components/schemas/OperatorTaskType'
         units_completed:
           type: integer
           minimum: 1
@@ -3597,6 +3810,10 @@ components:
         proof_object_key:
           type: string
           example: field_work_logs/log_001.jpg
+        work_date:
+          type: string
+          format: date-time
+          example: "2026-11-14T08:30:00Z"
 
     WorkLogDetail:
       type: object
@@ -3634,6 +3851,7 @@ components:
         - media_object_key
         - health_status
         - growth_cm
+        - captured_at
       properties:
         coral_fragment_id:
           type: string
@@ -3650,6 +3868,14 @@ components:
         growth_cm:
           type: number
           example: 1.45
+        captured_at:
+          type: string
+          format: date-time
+          example: "2026-11-14T08:30:00Z"
+        notes:
+          type: string
+          nullable: true
+          example: Coral attachment firm on spider frame mesh, no bleaching observed.
 
     CreatePayoutDraftRequest:
       type: object

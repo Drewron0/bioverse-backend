@@ -25,6 +25,8 @@ var (
 	ErrDonationNotFound = errors.New("donation record not found")
 	// ErrInsufficientPoints indicates user does not have enough points.
 	ErrInsufficientPoints = errors.New("insufficient points balance")
+	// ErrIdempotencyKeyReused indicates idempotency key was previously used with different parameters.
+	ErrIdempotencyKeyReused = errors.New("idempotency key reused with different parameters")
 )
 
 // CheckoutInput represents input payload for creating a donation.
@@ -97,6 +99,9 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 
 	existingDonation, err := s.store.GetDonationByIdempotencyKey(ctx, in.IdempotencyKey)
 	if err == nil {
+		if existingDonation.UserID != in.UserID || int(existingDonation.UnitQuantity) != in.UnitQuantity {
+			return nil, ErrIdempotencyKeyReused
+		}
 		return &DonationResult{
 			DonationID:         existingDonation.ID,
 			IdempotencyKey:     existingDonation.IdempotencyKey,

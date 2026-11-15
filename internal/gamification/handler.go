@@ -200,6 +200,17 @@ func (h *Handler) equipPetItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listMissions(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 50 {
+			limit = 50
+		} else {
+			limit = l
+		}
+	}
+	_ = limit
+
 	missions, err := h.service.ListActiveMissions(r.Context())
 	if err != nil {
 		httperr.InternalServerError(w, r)
@@ -214,6 +225,7 @@ func (h *Handler) listMissions(w http.ResponseWriter, r *http.Request) {
 type submitMissionRequest struct {
 	ProofObjectKey string     `json:"proof_object_key"`
 	ProofImageURL  string     `json:"proof_image_url,omitempty"`
+	PetID          *uuid.UUID `json:"pet_id,omitempty"`
 	TargetPetID    *uuid.UUID `json:"target_pet_id,omitempty"`
 }
 
@@ -246,7 +258,12 @@ func (h *Handler) submitMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.service.SubmitMissionProof(r.Context(), userID, missionID, req.TargetPetID, proofTarget)
+	targetPetID := req.PetID
+	if targetPetID == nil {
+		targetPetID = req.TargetPetID
+	}
+
+	res, err := h.service.SubmitMissionProof(r.Context(), userID, missionID, targetPetID, proofTarget)
 	if err != nil {
 		if errors.Is(err, ErrMissionNotFound) {
 			httperr.NotFound(w, r, "Mission not found")
@@ -366,9 +383,13 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
-	limit := int32(50)
-	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-		limit = int32(l)
+	limit := int32(10)
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 50 {
+			limit = 50
+		} else {
+			limit = int32(l)
+		}
 	}
 	offset := int32(0)
 	if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {

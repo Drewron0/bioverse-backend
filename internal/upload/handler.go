@@ -20,42 +20,48 @@ func NewHandler(svc *Service) *Handler {
 
 // RegisterRoutes mounts upload endpoints on the router.
 func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+	// Consumer uploads
 	r.Route("/v1/app/uploads", func(ur chi.Router) {
 		ur.Use(authMiddleware)
-		ur.Post("/presign", h.handlePresign)
+		ur.Post("/presign", h.handleUserPresign)
+	})
+
+	// Administrative uploads
+	r.Route("/v1/admin/uploads", func(ar chi.Router) {
+		ar.Use(authMiddleware)
+		ar.Post("/presign", h.handleAdminPresign)
 	})
 }
 
 type presignRequest struct {
 	FileName    string  `json:"file_name"`
 	ContentType string  `json:"content_type"`
+	SizeBytes   int64   `json:"size_bytes"`
 	Purpose     Purpose `json:"purpose"`
 }
 
-type presignResponse struct {
-	UploadURL        string `json:"upload_url"`
-	ObjectKey        string `json:"object_key"`
-	ExpiresInSeconds int    `json:"expires_in_seconds"`
+func (h *Handler) handleUserPresign(w http.ResponseWriter, r *http.Request) {
+	h.processPresign(w, r, false)
 }
 
-func (h *Handler) handlePresign(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleAdminPresign(w http.ResponseWriter, r *http.Request) {
+	h.processPresign(w, r, true)
+}
+
+func (h *Handler) processPresign(w http.ResponseWriter, r *http.Request, isAdmin bool) {
 	var req presignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httperr.BadRequest(w, r, "Invalid JSON payload provided.", nil)
 		return
 	}
 
-	result, err := h.service.RequestPresignedUpload(r.Context(), req.FileName, req.ContentType, req.Purpose)
+	result, err := h.service.RequestPresignedUpload(r.Context(), req.FileName, req.ContentType, req.SizeBytes, req.Purpose, isAdmin)
 	if err != nil {
 		httperr.BadRequest(w, r, err.Error(), nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(presignResponse{
-		UploadURL:        result.UploadURL,
-		ObjectKey:        result.ObjectKey,
-		ExpiresInSeconds: result.ExpiresInSeconds,
-	})
+	_ = json.NewEncoder(w).Encode(result)
 }

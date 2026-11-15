@@ -3,6 +3,7 @@ package httperr
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
 // ProblemDetails represents an RFC 7807 problem details response.
@@ -44,6 +45,11 @@ func Unauthorized(w http.ResponseWriter, r *http.Request, detail string) {
 	Respond(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized", detail, nil)
 }
 
+// UnauthorizedWithCode writes a 401 Unauthorized problem response with custom code.
+func UnauthorizedWithCode(w http.ResponseWriter, r *http.Request, code, detail string) {
+	Respond(w, r, http.StatusUnauthorized, code, "Unauthorized", detail, nil)
+}
+
 // Forbidden writes a 403 Forbidden problem response.
 func Forbidden(w http.ResponseWriter, r *http.Request, detail string) {
 	Respond(w, r, http.StatusForbidden, "FORBIDDEN", "Forbidden", detail, nil)
@@ -59,9 +65,22 @@ func Conflict(w http.ResponseWriter, r *http.Request, detail string) {
 	Respond(w, r, http.StatusConflict, "CONFLICT", "Conflict", detail, nil)
 }
 
+// ConflictWithCode writes a 409 Conflict problem response with custom stable code.
+func ConflictWithCode(w http.ResponseWriter, r *http.Request, code, detail string) {
+	Respond(w, r, http.StatusConflict, code, "Conflict", detail, nil)
+}
+
 // UnprocessableEntity writes a 422 Unprocessable Entity problem response.
 func UnprocessableEntity(w http.ResponseWriter, r *http.Request, detail string, errors map[string]string) {
 	Respond(w, r, http.StatusUnprocessableEntity, "UNPROCESSABLE_ENTITY", "Unprocessable Entity", detail, errors)
+}
+
+// TooManyRequests writes a 429 Too Many Requests problem response with Retry-After header.
+func TooManyRequests(w http.ResponseWriter, r *http.Request, retryAfterSeconds int, detail string) {
+	if retryAfterSeconds > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	}
+	Respond(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too Many Requests", detail, nil)
 }
 
 // InternalServerError writes a 500 Internal Server Error problem response.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
@@ -46,6 +47,12 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 
 	r.Route("/v1/admin/auth", func(adminAuth chi.Router) {
 		adminAuth.Post("/login", h.handleAdminLogin)
+		adminAuth.Post("/refresh", h.handleAdminRefresh)
+
+		adminAuth.Group(func(protected chi.Router) {
+			protected.Use(authMiddleware)
+			protected.Post("/logout", h.handleAdminLogout)
+		})
 	})
 }
 
@@ -436,7 +443,13 @@ func (h *Handler) handleFCMToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.RegisterFCMToken(r.Context(), userID, req.FCMToken, req.DeviceType); err != nil {
+	deviceType := strings.ToLower(req.DeviceType)
+	if deviceType != "ios" && deviceType != "android" {
+		httperr.BadRequest(w, r, "device_type must be either 'ios' or 'android'.", nil)
+		return
+	}
+
+	if err := h.service.RegisterFCMToken(r.Context(), userID, req.FCMToken, deviceType); err != nil {
 		httperr.InternalServerError(w, r)
 		return
 	}
@@ -458,6 +471,10 @@ func (h *Handler) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.AdminLogin(r.Context(), req.Email, req.Password, req.TOTPCode)
 	if err != nil {
+		if errors.Is(err, ErrMfaRequired) {
+			httperr.UnauthorizedWithCode(w, r, "MFA_REQUIRED", "Two-factor authentication TOTP code is required.")
+			return
+		}
 		httperr.Unauthorized(w, r, "Invalid admin credentials.")
 		return
 	}
@@ -470,5 +487,49 @@ func (h *Handler) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		TokenType:    "Bearer",
 		ExpiresIn:    result.ExpiresIn,
 		AdminRole:    result.AdminRole,
+	})
+}
+
+func (h *Handler) handleAdminRefresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid JSON payload provided.", nil)
+		return
+	}
+
+	result, err := h.service.AdminRefresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, ErrInvalidRefreshToken) || errors.Is(err, ErrRefreshTokenExpired) {
+			httperr.Unauthorized(w, r, "Invalid or expired admin refresh token.")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(adminAuthResponse{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    result.ExpiresIn,
+		AdminRole:    result.AdminRole,
+	})
+}
+
+func (h *Handler) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if req.RefreshToken != "" {
+		_ = h.service.AdminLogout(r.Context(), req.RefreshToken)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Admin session revoked successfully.",
 	})
 }

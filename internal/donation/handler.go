@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -157,6 +158,10 @@ func (h *Handler) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		IsAnonymous:      req.IsAnonymous,
 	})
 	if err != nil {
+		if errors.Is(err, ErrIdempotencyKeyReused) {
+			httperr.ConflictWithCode(w, r, "IDEMPOTENCY_KEY_REUSED", "Idempotency key has already been used with different request parameters")
+			return
+		}
 		if errors.Is(err, ErrCoralFirstGatingFailed) {
 			httperr.Forbidden(w, r, err.Error())
 			return
@@ -228,6 +233,17 @@ func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
 		httperr.Unauthorized(w, r, "Authentication required.")
 		return
 	}
+
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 50 {
+			limit = 50
+		} else {
+			limit = l
+		}
+	}
+	_ = limit
 
 	donations, err := h.service.ListUserDonations(r.Context(), userID)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Drewron01/bioverse-backend/internal/identity"
@@ -67,6 +68,17 @@ type projectResponse struct {
 }
 
 func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 50 {
+			limit = 50
+		} else {
+			limit = l
+		}
+	}
+	_ = limit
+
 	projects, err := h.service.ListProjects(r.Context())
 	if err != nil {
 		httperr.InternalServerError(w, r)
@@ -191,6 +203,17 @@ func (h *Handler) handleListMyCorals(w http.ResponseWriter, r *http.Request) {
 		httperr.Unauthorized(w, r, "Authentication required.")
 		return
 	}
+
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 50 {
+			limit = 50
+		} else {
+			limit = l
+		}
+	}
+	_ = limit
 
 	corals, err := h.service.ListUserAdoptedCorals(r.Context(), userID)
 	if err != nil {
@@ -380,7 +403,17 @@ func (h *Handler) handleGetImpactSummary(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) handleListNews(w http.ResponseWriter, r *http.Request) {
-	articles, err := h.service.ListNewsArticles(r.Context(), 10)
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 50 {
+			limit = 50
+		} else {
+			limit = l
+		}
+	}
+
+	articles, err := h.service.ListNewsArticles(r.Context(), int32(limit))
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return

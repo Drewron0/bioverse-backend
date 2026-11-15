@@ -128,6 +128,7 @@ type recordWorkLogRequest struct {
 	UnitsCompleted  int32                  `json:"units_completed"`
 	FeeEarnedIDR    decimal.Decimal        `json:"fee_earned_idr"`
 	ProofImageURL   string                 `json:"proof_image_url"`
+	WorkDate        *time.Time             `json:"work_date,omitempty"`
 }
 
 func (h *Handler) handleRecordWorkLog(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +142,11 @@ func (h *Handler) handleRecordWorkLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workDate := time.Now().UTC()
+	if req.WorkDate != nil && !req.WorkDate.IsZero() {
+		workDate = *req.WorkDate
+	}
+
 	log, err := h.service.RecordWorkLog(r.Context(), RecordWorkLogInput{
 		OperatorID:      req.OperatorID,
 		ProjectID:       req.ProjectID,
@@ -150,7 +156,7 @@ func (h *Handler) handleRecordWorkLog(w http.ResponseWriter, r *http.Request) {
 		UnitsCompleted:  req.UnitsCompleted,
 		FeeEarnedIDR:    req.FeeEarnedIDR,
 		ProofImageURL:   req.ProofImageURL,
-		WorkDate:        time.Now().UTC(),
+		WorkDate:        workDate,
 	})
 	if err != nil {
 		httperr.InternalServerError(w, r)
@@ -170,6 +176,8 @@ type recordMediaRequest struct {
 	Latitude        decimal.Decimal `json:"latitude"`
 	Longitude       decimal.Decimal `json:"longitude"`
 	DepthMeters     decimal.Decimal `json:"depth_meters"`
+	CapturedAt      *time.Time      `json:"captured_at,omitempty"`
+	Notes           *string         `json:"notes,omitempty"`
 }
 
 func (h *Handler) handleRecordMedia(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +185,16 @@ func (h *Handler) handleRecordMedia(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httperr.BadRequest(w, r, "Invalid request body", nil)
 		return
+	}
+
+	capturedAt := time.Now().UTC()
+	if req.CapturedAt != nil && !req.CapturedAt.IsZero() {
+		capturedAt = *req.CapturedAt
+	}
+
+	notes := ""
+	if req.Notes != nil {
+		notes = *req.Notes
 	}
 
 	ev, err := h.service.RecordMediaEvidence(r.Context(), RecordMediaEvidenceInput{
@@ -189,7 +207,8 @@ func (h *Handler) handleRecordMedia(w http.ResponseWriter, r *http.Request) {
 		Latitude:        req.Latitude,
 		Longitude:       req.Longitude,
 		DepthMeters:     req.DepthMeters,
-		CapturedAt:      time.Now().UTC(),
+		CapturedAt:      capturedAt,
+		Notes:           notes,
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidMilestoneMonth) {
