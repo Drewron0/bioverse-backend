@@ -140,11 +140,20 @@ WHERE id = $1
 RETURNING id, points_balance, locked_points_balance;
 
 -- name: GetLeaderboard :many
-SELECT id, full_name, avatar_url, points_balance,
-       ROW_NUMBER() OVER (ORDER BY points_balance DESC, created_at ASC) AS rank_position
-FROM users
-WHERE deleted_at IS NULL
-ORDER BY points_balance DESC, created_at ASC
+SELECT 
+    u.id, 
+    u.full_name, 
+    u.avatar_url, 
+    u.points_balance,
+    COALESCE(SUM(d.gross_project_value), 0)::numeric AS total_donations_usd,
+    COALESCE(SUM(d.unit_quantity), 0)::bigint AS total_units_adopted,
+    COALESCE(BOOL_OR(d.is_anonymous), false)::boolean AS is_anonymous,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(d.gross_project_value), 0) DESC, u.points_balance DESC, u.created_at ASC) AS rank_position
+FROM users u
+LEFT JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
+WHERE u.deleted_at IS NULL
+GROUP BY u.id, u.full_name, u.avatar_url, u.points_balance, u.created_at
+ORDER BY total_donations_usd DESC, u.points_balance DESC, u.created_at ASC
 LIMIT $1 OFFSET $2;
 
 -- name: CreatePointLedgerEntry :one

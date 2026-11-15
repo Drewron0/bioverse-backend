@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/Drewron0/bioverse-backend/internal/platform/middleware"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
@@ -31,6 +32,9 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware func(http.Handler) http.Handler) {
 	submissionLimiter := middleware.RateLimit(30, time.Minute)
 
+	// Public Leaderboard route (OpenAPI security: [])
+	r.Get("/v1/app/leaderboard", h.getLeaderboard)
+
 	r.Group(func(protected chi.Router) {
 		protected.Use(authMiddleware)
 
@@ -46,13 +50,13 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware f
 		protected.With(submissionLimiter).Post("/v1/app/missions/{id}/submit", h.submitMission)
 		protected.Get("/v1/app/mission-submissions/{id}", h.getMissionSubmission)
 
-		// Streaks & Leaderboard
+		// Streaks
 		protected.Get("/v1/app/streaks", h.getStreak)
-		protected.Get("/v1/app/leaderboard", h.getLeaderboard)
 	})
 
 	r.Group(func(adminRouter chi.Router) {
 		adminRouter.Use(adminMiddleware)
+		adminRouter.Use(identity.RequireAdminRole("super_admin", "operations", "content"))
 		adminRouter.Post("/v1/admin/gamification/missions", h.handleAdminCreateMission)
 		adminRouter.Put("/v1/admin/gamification/missions/{id}", h.handleAdminUpdateMission)
 	})
@@ -303,6 +307,13 @@ func (h *Handler) submitMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ProofObjectKey != "" {
+		if !strings.HasPrefix(req.ProofObjectKey, "mission_proofs/") || strings.Contains(req.ProofObjectKey, "..") {
+			httperr.BadRequest(w, r, "proof_object_key must begin with 'mission_proofs/' and not contain path traversals", nil)
+			return
+		}
+	}
+
 	targetPetID := req.PetID
 	if targetPetID == nil {
 		targetPetID = req.TargetPetID
@@ -447,30 +458,31 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rate := h.service.GetPointConversionRate(r.Context())
-	if rate.IsZero() {
-		rate = decimal.NewFromInt(100)
-	}
-
 	rankings := make([]leaderboardEntryResponse, 0, len(board))
 	for _, b := range board {
 		var avatar *string
 		if b.AvatarUrl.Valid && b.AvatarUrl.String != "" {
 			avatar = &b.AvatarUrl.String
 		}
-		pointsDec := decimal.NewFromInt(b.PointsBalance)
-		usdDec := pointsDec.DivRound(rate, 2)
+		usdDec := decimalutil.FromNumeric(b.TotalDonationsUsd)
 		usd := usdDec.StringFixed(2)
-		units := b.PointsBalance / 100
+		displayName := b.FullName
+		userID := b.ID
+
+		if b.IsAnonymous {
+			displayName = "Anonymous Supporter"
+			avatar = nil
+			userID = uuid.Nil
+		}
 
 		rankings = append(rankings, leaderboardEntryResponse{
 			Rank:              b.RankPosition,
-			UserID:            b.ID,
-			DisplayName:       b.FullName,
+			UserID:            userID,
+			DisplayName:       displayName,
 			AvatarURL:         avatar,
 			TotalDonationsUSD: usd,
-			TotalUnitsAdopted: units,
-			IsAnonymous:       false,
+			TotalUnitsAdopted: b.TotalUnitsAdopted,
+			IsAnonymous:       b.IsAnonymous,
 		})
 	}
 

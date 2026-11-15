@@ -84,6 +84,7 @@ type Querier interface {
 	GetTodaySubmissionForMission(ctx context.Context, arg GetTodaySubmissionForMissionParams) (UserMissionSubmissions, error)
 	GetUserByEmail(ctx context.Context, email string) (Users, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (Users, error)
+	GetUserByReferralCode(ctx context.Context, referralCode pgtype.Text) (GetUserByReferralCodeRow, error)
 	GetUserInventoryItem(ctx context.Context, arg GetUserInventoryItemParams) (GetUserInventoryItemRow, error)
 	GetUserStreakByUserID(ctx context.Context, userID uuid.UUID) (UserStreaks, error)
 	GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHashParams) (UserTokens, error)
@@ -91,6 +92,7 @@ type Querier interface {
 	GetWebhookEventByProviderAndExternalID(ctx context.Context, arg GetWebhookEventByProviderAndExternalIDParams) (WebhookEvents, error)
 	IncrementProjectFundedUnits(ctx context.Context, arg IncrementProjectFundedUnitsParams) (IncrementProjectFundedUnitsRow, error)
 	IncrementSpiderFrameFragmentsPlanted(ctx context.Context, arg IncrementSpiderFrameFragmentsPlantedParams) (IncrementSpiderFrameFragmentsPlantedRow, error)
+	LinkCompanyMemberUserByEmail(ctx context.Context, arg LinkCompanyMemberUserByEmailParams) error
 	LinkWorkLogsToPayout(ctx context.Context, arg LinkWorkLogsToPayoutParams) error
 	ListActiveB2BPackages(ctx context.Context) ([]B2bPackages, error)
 	ListActiveCurrencies(ctx context.Context) ([]Currencies, error)

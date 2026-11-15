@@ -348,8 +348,19 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 		Valid: true,
 	}
 
-	// Default to primary pet if targetPetID is not provided
-	if targetPetID == nil {
+	// Default to primary pet if targetPetID is not provided, or verify ownership if provided
+	if targetPetID != nil {
+		_, err := s.store.GetVirtualPetByID(ctx, store.GetVirtualPetByIDParams{
+			ID:     *targetPetID,
+			UserID: userID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrPetNotFound
+			}
+			return nil, fmt.Errorf("failed to verify pet ownership: %w", err)
+		}
+	} else {
 		pets, err := s.store.ListVirtualPetsByUserID(ctx, userID)
 		if err == nil && len(pets) > 0 {
 			for _, p := range pets {
@@ -551,6 +562,21 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 
 // EquipPetItem assigns a cosmetic product to the pet.
 func (s *Service) EquipPetItem(ctx context.Context, userID, petID, productID uuid.UUID) (*store.VirtualPets, error) {
+	// Verify user owns the item in digital inventory
+	invItem, err := s.store.GetUserInventoryItem(ctx, store.GetUserInventoryItemParams{
+		UserID: userID,
+		ID:     productID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("item not owned in user inventory")
+		}
+		return nil, fmt.Errorf("failed to verify inventory item: %w", err)
+	}
+	if invItem.Quantity <= 0 {
+		return nil, errors.New("item not owned in user inventory")
+	}
+
 	pet, err := s.store.EquipVirtualPetProduct(ctx, store.EquipVirtualPetProductParams{
 		ID:                petID,
 		UserID:            userID,

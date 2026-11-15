@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 var (
@@ -191,22 +192,61 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*AuthResult, 
 	var createdUser store.CreateUserRow
 	var createdStreak store.UserStreaks
 
+	currency := in.PreferredCurrencyCode
+	if strings.TrimSpace(currency) == "" {
+		currency = "USD"
+	}
+
+	var phoneText pgtype.Text
+	if strings.TrimSpace(in.PhoneNumber) != "" {
+		phoneText = pgtype.Text{String: strings.TrimSpace(in.PhoneNumber), Valid: true}
+	}
+
+	var genderEnum store.NullUserGender
+	if strings.TrimSpace(in.Gender) != "" {
+		genderEnum = store.NullUserGender{UserGender: store.UserGender(strings.TrimSpace(in.Gender)), Valid: true}
+	}
+
+	var dob pgtype.Date
+	if strings.TrimSpace(in.DateOfBirth) != "" {
+		if parsedDate, err := time.Parse("2006-01-02", strings.TrimSpace(in.DateOfBirth)); err == nil {
+			dob = pgtype.Date{Time: parsedDate, Valid: true}
+		}
+	}
+
 	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		txStore := store.New(tx)
+
+		var referredByUUID pgtype.UUID
+		if strings.TrimSpace(in.ReferralCode) != "" {
+			refCode := pgtype.Text{String: strings.ToUpper(strings.TrimSpace(in.ReferralCode)), Valid: true}
+			if referrer, err := txStore.GetUserByReferralCode(ctx, refCode); err == nil {
+				referredByUUID = pgtype.UUID{Bytes: referrer.ID, Valid: true}
+			}
+		}
 
 		u, err := txStore.CreateUser(ctx, store.CreateUserParams{
 			ID:                    userID,
 			FullName:              in.FullName,
 			Email:                 in.Email,
 			PasswordHash:          pgtype.Text{String: passwordHash, Valid: true},
+			PhoneNumber:           phoneText,
+			Gender:                genderEnum,
+			DateOfBirth:           dob,
 			Timezone:              timezone,
-			PreferredCurrencyCode: "USD",
+			PreferredCurrencyCode: currency,
 			ReferralCode:          pgtype.Text{String: referralCode, Valid: true},
+			ReferredByUserID:      referredByUUID,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to insert user record: %w", err)
 		}
 		createdUser = u
+
+		_ = txStore.LinkCompanyMemberUserByEmail(ctx, store.LinkCompanyMemberUserByEmailParams{
+			InvitedEmail: in.Email,
+			UserID:       pgtype.UUID{Bytes: userID, Valid: true},
+		})
 
 		st, err := txStore.CreateUserStreak(ctx, userID)
 		if err != nil {
@@ -509,16 +549,80 @@ func (s *Service) GetUserProfile(ctx context.Context, userID uuid.UUID) (*UserSu
 	}, nil
 }
 
+// validateGoogleIDToken parses and validates a Google OIDC ID token structure and claims.
+func (s *Service) validateGoogleIDToken(idToken string) (string, string, error) {
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return "", "", errors.New("invalid Google ID token format: token must have 3 segments")
+	}
+
+	parser := jwt.NewParser()
+	token, _, err := parser.ParseUnverified(idToken, jwt.MapClaims{})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse Google ID token: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", "", errors.New("invalid Google ID token claims payload")
+	}
+
+	iss, _ := claims["iss"].(string)
+	if iss != "accounts.google.com" && iss != "https://accounts.google.com" {
+		return "", "", errors.New("invalid Google ID token issuer")
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok || time.Now().UTC().Unix() > int64(exp) {
+		return "", "", errors.New("google ID token has expired")
+	}
+
+	if s.config.OAuth.GoogleClientID != "" {
+		aud, _ := claims["aud"].(string)
+		if aud != s.config.OAuth.GoogleClientID {
+			return "", "", errors.New("google ID token audience mismatch")
+		}
+	}
+
+	emailRaw, ok := claims["email"].(string)
+	if !ok || strings.TrimSpace(emailRaw) == "" {
+		return "", "", errors.New("google ID token missing email claim")
+	}
+	email := strings.ToLower(strings.TrimSpace(emailRaw))
+	if _, err := mail.ParseAddress(email); err != nil {
+		return "", "", fmt.Errorf("invalid email address in Google ID token: %w", err)
+	}
+
+	if ev, ok := claims["email_verified"]; ok {
+		switch v := ev.(type) {
+		case bool:
+			if !v {
+				return "", "", errors.New("google email is not verified")
+			}
+		case string:
+			if strings.ToLower(v) != "true" {
+				return "", "", errors.New("google email is not verified")
+			}
+		}
+	}
+
+	fullName, _ := claims["name"].(string)
+	if strings.TrimSpace(fullName) == "" {
+		fullName = "Google User"
+	}
+
+	return email, fullName, nil
+}
+
 // LoginWithGoogle performs authentication via Google ID token.
 func (s *Service) LoginWithGoogle(ctx context.Context, idToken string, deviceInfo string) (*AuthResult, error) {
 	if strings.TrimSpace(idToken) == "" {
 		return nil, errors.New("id_token must not be empty")
 	}
 
-	email := "google_user@example.com"
-	fullName := "Google User"
-	if strings.Contains(idToken, "@") {
-		email = strings.ToLower(strings.TrimSpace(idToken))
+	email, fullName, err := s.validateGoogleIDToken(idToken)
+	if err != nil {
+		return nil, fmt.Errorf("google token validation failed: %w", err)
 	}
 
 	user, err := s.store.GetUserByEmail(ctx, email)
@@ -687,35 +791,54 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 
 // UpdateUserProfile updates editable personal details of an authenticated user.
 func (s *Service) UpdateUserProfile(ctx context.Context, userID uuid.UUID, in UpdateProfileInput) (*UserSummary, error) {
+	existingUser, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("user not found")
+		}
+		return nil, fmt.Errorf("failed to query user: %w", err)
+	}
+
+	fullName := existingUser.FullName
+	if in.FullName != nil && strings.TrimSpace(*in.FullName) != "" {
+		fullName = strings.TrimSpace(*in.FullName)
+	}
+	timezone := existingUser.Timezone
+	if in.Timezone != nil && strings.TrimSpace(*in.Timezone) != "" {
+		timezone = strings.TrimSpace(*in.Timezone)
+	}
+	currency := existingUser.PreferredCurrencyCode
+	if in.PreferredCurrencyCode != nil && strings.TrimSpace(*in.PreferredCurrencyCode) != "" {
+		currency = strings.TrimSpace(*in.PreferredCurrencyCode)
+	}
+
 	params := store.UpdateUserProfileParams{
-		ID: userID,
+		ID:                    userID,
+		FullName:              fullName,
+		Timezone:              timezone,
+		PreferredCurrencyCode: currency,
+		PhoneNumber:           existingUser.PhoneNumber,
+		Gender:                existingUser.Gender,
+		DateOfBirth:           existingUser.DateOfBirth,
+		AvatarUrl:             existingUser.AvatarUrl,
 	}
-	if in.FullName != nil {
-		params.FullName = *in.FullName
-	}
+
 	if in.PhoneNumber != nil {
-		params.PhoneNumber = pgtype.Text{String: *in.PhoneNumber, Valid: true}
+		params.PhoneNumber = pgtype.Text{String: strings.TrimSpace(*in.PhoneNumber), Valid: strings.TrimSpace(*in.PhoneNumber) != ""}
 	}
 	if in.Gender != nil {
-		params.Gender = store.NullUserGender{UserGender: store.UserGender(*in.Gender), Valid: true}
+		params.Gender = store.NullUserGender{UserGender: store.UserGender(strings.TrimSpace(*in.Gender)), Valid: strings.TrimSpace(*in.Gender) != ""}
 	}
 	if in.DateOfBirth != nil {
-		parsedDate, err := time.Parse("2006-01-02", *in.DateOfBirth)
-		if err == nil {
+		if parsedDate, err := time.Parse("2006-01-02", strings.TrimSpace(*in.DateOfBirth)); err == nil {
 			params.DateOfBirth = pgtype.Date{Time: parsedDate, Valid: true}
 		}
 	}
-	if in.Timezone != nil {
-		params.Timezone = *in.Timezone
-	}
-	if in.PreferredCurrencyCode != nil {
-		params.PreferredCurrencyCode = *in.PreferredCurrencyCode
-	}
 	if in.AvatarURL != nil {
-		params.AvatarUrl = pgtype.Text{String: *in.AvatarURL, Valid: true}
+		params.AvatarUrl = pgtype.Text{String: strings.TrimSpace(*in.AvatarURL), Valid: strings.TrimSpace(*in.AvatarURL) != ""}
 	}
 
-	_, err := s.store.UpdateUserProfile(ctx, params)
+	_, err = s.store.UpdateUserProfile(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update user profile: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/config"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -152,5 +153,49 @@ func TestIdentityEndToEndFlow(t *testing.T) {
 	err = service.MarkAllNotificationsRead(ctx, regResult.User.ID)
 	if err != nil {
 		t.Fatalf("failed to mark all notifications read: %v", err)
+	}
+
+	// 9. Verify partial profile update preserves existing fields
+	newPhone := "+628123456789"
+	updatedProfile, err := service.UpdateUserProfile(ctx, regResult.User.ID, UpdateProfileInput{
+		PhoneNumber: &newPhone,
+	})
+	if err != nil {
+		t.Fatalf("failed to update profile: %v", err)
+	}
+	if updatedProfile.FullName != regResult.User.FullName {
+		t.Errorf("expected FullName to be preserved as %s, got %s", regResult.User.FullName, updatedProfile.FullName)
+	}
+	if updatedProfile.PreferredCurrencyCode != "USD" {
+		t.Errorf("expected Currency to be preserved as USD, got %s", updatedProfile.PreferredCurrencyCode)
+	}
+	if updatedProfile.PhoneNumber == nil || *updatedProfile.PhoneNumber != newPhone {
+		t.Errorf("expected PhoneNumber %s, got %v", newPhone, updatedProfile.PhoneNumber)
+	}
+
+	// 10. Verify Google Login rejects raw email injection & invalid tokens
+	_, err = service.LoginWithGoogle(ctx, "victim@example.com", "TestDevice")
+	if err == nil {
+		t.Fatal("expected LoginWithGoogle to reject raw email string")
+	}
+
+	// Test valid Google JWT structure
+	claims := jwt.MapClaims{
+		"iss":            "accounts.google.com",
+		"aud":            cfg.OAuth.GoogleClientID,
+		"exp":            time.Now().Add(time.Hour).Unix(),
+		"email":          fmt.Sprintf("google_%d@bioverse.id", time.Now().UnixNano()),
+		"email_verified": true,
+		"name":           "Google Test User",
+	}
+	rawToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, _ := rawToken.SignedString([]byte("any-dummy-test-key"))
+
+	gResult, err := service.LoginWithGoogle(ctx, signedToken, "TestDevice")
+	if err != nil {
+		t.Fatalf("expected valid Google JWT to succeed: %v", err)
+	}
+	if gResult.AccessToken == "" {
+		t.Fatal("expected access token from google login")
 	}
 }

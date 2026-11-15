@@ -3,6 +3,7 @@ package conservation
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -45,16 +46,24 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware f
 
 	r.Group(func(adminRouter chi.Router) {
 		adminRouter.Use(adminMiddleware)
-		adminRouter.Post("/v1/admin/conservation/zones", h.handleAdminCreateZone)
-		adminRouter.Get("/v1/admin/conservation/zones", h.handleAdminListZones)
-		adminRouter.Put("/v1/admin/conservation/zones/{id}", h.handleAdminUpdateZone)
-		adminRouter.Post("/v1/admin/conservation/projects", h.handleAdminCreateProject)
-		adminRouter.Put("/v1/admin/conservation/projects/{id}", h.handleAdminUpdateProject)
-		adminRouter.Post("/v1/admin/conservation/frames", h.handleAdminCreateFrame)
-		adminRouter.Get("/v1/admin/conservation/frames", h.handleAdminListFrames)
-		adminRouter.Post("/v1/admin/content/news", h.handleAdminCreateNews)
-		adminRouter.Put("/v1/admin/content/news/{id}", h.handleAdminUpdateNews)
-		adminRouter.Delete("/v1/admin/content/news/{id}", h.handleAdminDeleteNews)
+
+		adminRouter.Group(func(ops chi.Router) {
+			ops.Use(identity.RequireAdminRole("super_admin", "operations"))
+			ops.Post("/v1/admin/conservation/zones", h.handleAdminCreateZone)
+			ops.Get("/v1/admin/conservation/zones", h.handleAdminListZones)
+			ops.Put("/v1/admin/conservation/zones/{id}", h.handleAdminUpdateZone)
+			ops.Post("/v1/admin/conservation/projects", h.handleAdminCreateProject)
+			ops.Put("/v1/admin/conservation/projects/{id}", h.handleAdminUpdateProject)
+			ops.Post("/v1/admin/conservation/frames", h.handleAdminCreateFrame)
+			ops.Get("/v1/admin/conservation/frames", h.handleAdminListFrames)
+		})
+
+		adminRouter.Group(func(content chi.Router) {
+			content.Use(identity.RequireAdminRole("super_admin", "content", "operations"))
+			content.Post("/v1/admin/content/news", h.handleAdminCreateNews)
+			content.Put("/v1/admin/content/news/{id}", h.handleAdminUpdateNews)
+			content.Delete("/v1/admin/content/news/{id}", h.handleAdminDeleteNews)
+		})
 	})
 }
 
@@ -85,7 +94,7 @@ type projectResponse struct {
 
 func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
-	limit := 10
+	limit := 20
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		if l > 50 {
 			limit = 50
@@ -93,7 +102,10 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
-	_ = limit
+
+	categoryFilter := r.URL.Query().Get("category")
+	statusFilter := r.URL.Query().Get("status")
+	cursor := r.URL.Query().Get("cursor")
 
 	projects, err := h.service.ListProjects(r.Context())
 	if err != nil {
@@ -101,13 +113,36 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	categoryFilter := r.URL.Query().Get("category")
-
-	items := make([]projectResponse, 0, len(projects))
+	filtered := make([]store.ListConservationProjectsRow, 0, len(projects))
 	for _, p := range projects {
 		if categoryFilter != "" && string(p.Category) != categoryFilter {
 			continue
 		}
+		if statusFilter != "" && string(p.Status) != statusFilter {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+
+	startIndex := 0
+	if cursor != "" {
+		for i, p := range filtered {
+			if p.ID.String() == cursor {
+				startIndex = i + 1
+				break
+			}
+		}
+	}
+
+	items := make([]projectResponse, 0, limit)
+	var nextCursor *string
+	for i := startIndex; i < len(filtered); i++ {
+		if len(items) >= limit {
+			c := filtered[i-1].ID.String()
+			nextCursor = &c
+			break
+		}
+		p := filtered[i]
 
 		isUrgent := false
 		if p.DonationEndDate.Valid {
@@ -118,6 +153,17 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.TargetUnits > 0 && float64(p.FundedUnitsCount)/float64(p.TargetUnits) >= 0.8 {
 			isUrgent = true
+		}
+
+		var donStart, donEnd, plantEst string
+		if p.DonationStartDate.Valid {
+			donStart = p.DonationStartDate.Time.Format("2006-01-02")
+		}
+		if p.DonationEndDate.Valid {
+			donEnd = p.DonationEndDate.Time.Format("2006-01-02")
+		}
+		if p.EstimatedPlantingDate.Valid {
+			plantEst = p.EstimatedPlantingDate.Time.Format("2006-01-02")
 		}
 
 		items = append(items, projectResponse{
@@ -137,9 +183,9 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			FundedUnitsCount:      p.FundedUnitsCount,
 			PlantedUnitsCount:     p.PlantedUnitsCount,
 			SurvivingUnitsCount:   p.SurvivingUnitsCount,
-			DonationStartDate:     p.DonationStartDate.Time.Format("2006-01-02"),
-			DonationEndDate:       p.DonationEndDate.Time.Format("2006-01-02"),
-			EstimatedPlantingDate: p.EstimatedPlantingDate.Time.Format("2006-01-02"),
+			DonationStartDate:     donStart,
+			DonationEndDate:       donEnd,
+			EstimatedPlantingDate: plantEst,
 			ImageURL:              p.ImageUrl,
 			IsUrgent:              isUrgent,
 			CreatedAt:             time.Now().UTC().Format(time.RFC3339),
@@ -150,7 +196,7 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"items":       items,
-		"next_cursor": nil,
+		"next_cursor": nextCursor,
 	})
 }
 
@@ -297,6 +343,12 @@ func (h *Handler) handleListMyCorals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleGetCoral(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required.")
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	fragID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -306,6 +358,11 @@ func (h *Handler) handleGetCoral(w http.ResponseWriter, r *http.Request) {
 
 	frag, err := h.service.GetCoralFragment(r.Context(), fragID)
 	if err != nil {
+		httperr.NotFound(w, r, "Adopted coral fragment not found.")
+		return
+	}
+
+	if !frag.AdoptedByUserID.Valid || frag.AdoptedByUserID.Bytes != userID {
 		httperr.NotFound(w, r, "Adopted coral fragment not found.")
 		return
 	}
@@ -351,10 +408,27 @@ func (h *Handler) handleGetCoral(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleGetCoralTimeline(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required.")
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	fragID, err := uuid.Parse(idStr)
 	if err != nil {
 		httperr.BadRequest(w, r, "Invalid coral fragment UUID format.", nil)
+		return
+	}
+
+	frag, err := h.service.GetCoralFragment(r.Context(), fragID)
+	if err != nil {
+		httperr.NotFound(w, r, "Adopted coral fragment not found.")
+		return
+	}
+
+	if !frag.AdoptedByUserID.Valid || frag.AdoptedByUserID.Bytes != userID {
+		httperr.NotFound(w, r, "Adopted coral fragment not found.")
 		return
 	}
 
@@ -384,11 +458,19 @@ func (h *Handler) handleGetCoralTimeline(w http.ResponseWriter, r *http.Request)
 			health = string(m.HealthStatus.EnvironmentalHealthStatus)
 		}
 
+		growth := float64(m.MilestoneMonth.Int32) * 0.75
+		if m.SubtitleMetrics.Valid {
+			var parsed float64
+			if n, _ := fmt.Sscanf(m.SubtitleMetrics.String, "%f", &parsed); n > 0 {
+				growth = parsed
+			}
+		}
+
 		items = append(items, milestoneItem{
 			MilestoneMonth: m.MilestoneMonth.Int32,
 			PhotoURL:       m.MediaUrl,
 			HealthStatus:   health,
-			GrowthCM:       1.45,
+			GrowthCM:       growth,
 			Notes:          notes,
 			VerifiedAt:     m.CapturedAt.Time.Format(time.RFC3339),
 		})

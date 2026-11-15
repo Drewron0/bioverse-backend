@@ -30,6 +30,11 @@ SELECT * FROM company_members
 WHERE company_id = $1
 ORDER BY role ASC, full_name ASC;
 
+-- name: LinkCompanyMemberUserByEmail :exec
+UPDATE company_members
+SET user_id = $2
+WHERE invited_email ILIKE $1 AND user_id IS NULL;
+
 -- name: ListActiveB2BPackages :many
 SELECT * FROM b2b_packages
 WHERE is_active = true

@@ -128,7 +128,7 @@ func (s *Service) RequestPresignedUpload(ctx context.Context, fileName, contentT
 	objectKey := fmt.Sprintf("%s/%s%s", folder, uuid.New().String(), ext)
 	expiresIn := 900 // 15 minutes
 
-	presignedURL, err := s.signS3PutURL(objectKey, expiresIn)
+	presignedURL, err := s.signS3PutURL(objectKey, contentType, expiresIn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign presigned upload target: %w", err)
 	}
@@ -146,7 +146,7 @@ func (s *Service) RequestPresignedUpload(ctx context.Context, fileName, contentT
 }
 
 // signS3PutURL calculates standard AWS SigV4 presigned PUT target URL.
-func (s *Service) signS3PutURL(objectKey string, expiresInSeconds int) (string, error) {
+func (s *Service) signS3PutURL(objectKey, contentType string, expiresInSeconds int) (string, error) {
 	parsedURL, err := url.Parse(s.cfg.Endpoint)
 	if err != nil {
 		return "", fmt.Errorf("invalid storage endpoint URL: %w", err)
@@ -161,26 +161,29 @@ func (s *Service) signS3PutURL(objectKey string, expiresInSeconds int) (string, 
 
 	canonicalURI := fmt.Sprintf("/%s/%s", s.cfg.BucketName, strings.TrimPrefix(objectKey, "/"))
 
-	queryParams := url.Values{}
-	queryParams.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
-	queryParams.Set("X-Amz-Credential", credentialParam)
-	queryParams.Set("X-Amz-Date", amzDate)
-	queryParams.Set("X-Amz-Expires", fmt.Sprintf("%d", expiresInSeconds))
-	queryParams.Set("X-Amz-SignedHeaders", "host")
-
-	canonicalQueryString := queryParams.Encode()
-
 	host := parsedURL.Host
 	if host == "" {
 		host = "127.0.0.1:9000"
 	}
 
+	signedHeaders := "content-type;host"
+	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\n", strings.ToLower(strings.TrimSpace(contentType)), host)
+
+	queryParams := url.Values{}
+	queryParams.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	queryParams.Set("X-Amz-Credential", credentialParam)
+	queryParams.Set("X-Amz-Date", amzDate)
+	queryParams.Set("X-Amz-Expires", fmt.Sprintf("%d", expiresInSeconds))
+	queryParams.Set("X-Amz-SignedHeaders", signedHeaders)
+
+	canonicalQueryString := queryParams.Encode()
+
 	canonicalRequest := strings.Join([]string{
 		"PUT",
 		canonicalURI,
 		canonicalQueryString,
-		fmt.Sprintf("host:%s\n", host),
-		"host",
+		canonicalHeaders,
+		signedHeaders,
 		"UNSIGNED-PAYLOAD",
 	}, "\n")
 

@@ -147,6 +147,29 @@ type RecordWorkLogInput struct {
 
 // RecordWorkLog logs an operational restoration task completed on the ground.
 func (s *Service) RecordWorkLog(ctx context.Context, in RecordWorkLogInput) (*store.OperatorWorkLogs, error) {
+	if in.UnitsCompleted <= 0 {
+		return nil, errors.New("units_completed must be positive")
+	}
+
+	op, err := s.store.GetFieldOperatorByID(ctx, in.OperatorID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrOperatorNotFound
+		}
+		return nil, fmt.Errorf("failed to fetch operator: %w", err)
+	}
+
+	var rate decimal.Decimal
+	if in.TaskType == store.OperatorTaskTypePlanting {
+		rate = decimalutil.FromNumeric(op.RatePerPlantingIdr)
+	} else {
+		rate = decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
+	}
+	feeEarned := rate.Mul(decimal.NewFromInt(int64(in.UnitsCompleted)))
+	if feeEarned.IsZero() && in.FeeEarnedIDR.IsPositive() {
+		feeEarned = in.FeeEarnedIDR
+	}
+
 	logID, _ := uuid.NewV7()
 	var frameID pgtype.UUID
 	if in.SpiderFrameID != nil {
@@ -166,7 +189,7 @@ func (s *Service) RecordWorkLog(ctx context.Context, in RecordWorkLogInput) (*st
 		CoralFragmentID:    fragID,
 		TaskType:           in.TaskType,
 		UnitsCompleted:     in.UnitsCompleted,
-		FeeEarnedIdr:       decimalutil.ToNumeric(in.FeeEarnedIDR),
+		FeeEarnedIdr:       decimalutil.ToNumeric(feeEarned),
 		ProofImageUrl:      in.ProofImageURL,
 		VerificationStatus: store.SubmissionStatusVerified,
 		WorkDate:           pgtype.Timestamptz{Time: in.WorkDate, Valid: true},
@@ -303,26 +326,13 @@ func (s *Service) CreatePayoutWithInput(ctx context.Context, in CreatePayoutInpu
 		unitsPlanted = summary.UnitsPlanted
 		maintenanceTasks = summary.MaintenanceTasks
 		totalFee := decimalutil.FromNumeric(summary.TotalFeeEarnedIdr)
+		plantingRate := decimalutil.FromNumeric(op.RatePerPlantingIdr)
+		maintRate := decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
+		calculated := plantingRate.Mul(decimal.NewFromInt(int64(unitsPlanted))).Add(maintRate.Mul(decimal.NewFromInt(int64(maintenanceTasks))))
 		if totalFee.IsPositive() {
 			grossAmountIDR = totalFee
 		} else {
-			plantingRate := decimalutil.FromNumeric(op.RatePerPlantingIdr)
-			maintRate := decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
-			grossAmountIDR = plantingRate.Mul(decimal.NewFromInt(int64(unitsPlanted))).Add(maintRate.Mul(decimal.NewFromInt(int64(maintenanceTasks))))
-		}
-	} else {
-		if in.UnitsPlanted != nil {
-			unitsPlanted = *in.UnitsPlanted
-		}
-		if in.MaintenanceTasks != nil {
-			maintenanceTasks = *in.MaintenanceTasks
-		}
-		if in.GrossAmountIDR != nil {
-			grossAmountIDR = *in.GrossAmountIDR
-		} else {
-			plantingRate := decimalutil.FromNumeric(op.RatePerPlantingIdr)
-			maintRate := decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
-			grossAmountIDR = plantingRate.Mul(decimal.NewFromInt(int64(unitsPlanted))).Add(maintRate.Mul(decimal.NewFromInt(int64(maintenanceTasks))))
+			grossAmountIDR = calculated
 		}
 	}
 

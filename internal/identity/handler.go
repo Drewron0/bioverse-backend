@@ -31,11 +31,11 @@ func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMidd
 	r.Route("/v1/app/auth", func(authRouter chi.Router) {
 		authRouter.With(authLimiter).Post("/register", h.handleRegister)
 		authRouter.With(authLimiter).Post("/login", h.handleLogin)
-		authRouter.Post("/google", h.handleGoogleLogin)
-		authRouter.Post("/refresh", h.handleRefresh)
+		authRouter.With(authLimiter).Post("/google", h.handleGoogleLogin)
+		authRouter.With(authLimiter).Post("/refresh", h.handleRefresh)
 		authRouter.With(authLimiter).Post("/forgot-password", h.handleForgotPassword)
 		authRouter.With(authLimiter).Post("/reset-password", h.handleResetPassword)
-		authRouter.Post("/verify-email", h.handleVerifyEmail)
+		authRouter.With(authLimiter).Post("/verify-email", h.handleVerifyEmail)
 
 		authRouter.Group(func(protected chi.Router) {
 			protected.Use(userAuthMiddleware)
@@ -59,7 +59,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMidd
 
 	r.Route("/v1/admin/auth", func(adminAuth chi.Router) {
 		adminAuth.With(authLimiter).Post("/login", h.handleAdminLogin)
-		adminAuth.Post("/refresh", h.handleAdminRefresh)
+		adminAuth.With(authLimiter).Post("/refresh", h.handleAdminRefresh)
 
 		adminAuth.Group(func(protected chi.Router) {
 			protected.Use(adminAuthMiddleware)

@@ -28,6 +28,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware, userMiddleware func(http.Handler) http.Handler) {
 	r.Group(func(protected chi.Router) {
 		protected.Use(adminMiddleware)
+		protected.Use(identity.RequireAdminRole("super_admin", "operations", "finance"))
 
 		// Admin B2B & ESG endpoints
 		protected.Post("/v1/admin/b2b/companies", h.handleRegisterCompany)

@@ -358,4 +358,22 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	if errMsg == nil || !strings.Contains(*errMsg, "Settlement amount mismatch") {
 		t.Errorf("expected error message to contain 'Settlement amount mismatch', got %v", errMsg)
 	}
+
+	// 14. Terminal status test: late webhook on expired donation must be rejected and must not mark donation paid
+	_, err = pool.Exec(ctx, "UPDATE donations SET payment_status = 'expired', is_points_locked = false WHERE id = $1", failedDonRes.DonationID)
+	if err != nil {
+		t.Fatalf("failed to set donation to expired: %v", err)
+	}
+
+	lateEventID := "evt_late_" + uuid.New().String()
+	err = donSvc.ProcessXenditInvoiceWebhook(ctx, lateEventID, "donation_"+failedDonRes.DonationID.String(), "PAID", failedDonRes.SettlementAmount, []byte(`{"status":"PAID"}`))
+	if err == nil {
+		t.Fatalf("expected error processing late webhook on expired donation, got nil")
+	}
+
+	var statusAfterLate store.PaymentStatus
+	_ = pool.QueryRow(ctx, "SELECT payment_status FROM donations WHERE id = $1", failedDonRes.DonationID).Scan(&statusAfterLate)
+	if statusAfterLate != store.PaymentStatusExpired {
+		t.Errorf("expected donation to remain expired after late webhook, got %s", statusAfterLate)
+	}
 }

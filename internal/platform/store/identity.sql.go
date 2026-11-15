@@ -117,27 +117,36 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-    id, full_name, email, password_hash, timezone, preferred_currency_code, referral_code
+    id, full_name, email, password_hash, phone_number, gender, date_of_birth,
+    timezone, preferred_currency_code, referral_code, referred_by_user_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, full_name, email, is_email_verified, timezone, preferred_currency_code, 
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+) RETURNING id, full_name, email, phone_number, gender, date_of_birth,
+            is_email_verified, timezone, preferred_currency_code, 
             referral_code, points_balance, locked_points_balance, created_at
 `
 
 type CreateUserParams struct {
-	ID                    uuid.UUID   `json:"id"`
-	FullName              string      `json:"full_name"`
-	Email                 string      `json:"email"`
-	PasswordHash          pgtype.Text `json:"password_hash"`
-	Timezone              string      `json:"timezone"`
-	PreferredCurrencyCode string      `json:"preferred_currency_code"`
-	ReferralCode          pgtype.Text `json:"referral_code"`
+	ID                    uuid.UUID      `json:"id"`
+	FullName              string         `json:"full_name"`
+	Email                 string         `json:"email"`
+	PasswordHash          pgtype.Text    `json:"password_hash"`
+	PhoneNumber           pgtype.Text    `json:"phone_number"`
+	Gender                NullUserGender `json:"gender"`
+	DateOfBirth           pgtype.Date    `json:"date_of_birth"`
+	Timezone              string         `json:"timezone"`
+	PreferredCurrencyCode string         `json:"preferred_currency_code"`
+	ReferralCode          pgtype.Text    `json:"referral_code"`
+	ReferredByUserID      pgtype.UUID    `json:"referred_by_user_id"`
 }
 
 type CreateUserRow struct {
 	ID                    uuid.UUID          `json:"id"`
 	FullName              string             `json:"full_name"`
 	Email                 string             `json:"email"`
+	PhoneNumber           pgtype.Text        `json:"phone_number"`
+	Gender                NullUserGender     `json:"gender"`
+	DateOfBirth           pgtype.Date        `json:"date_of_birth"`
 	IsEmailVerified       bool               `json:"is_email_verified"`
 	Timezone              string             `json:"timezone"`
 	PreferredCurrencyCode string             `json:"preferred_currency_code"`
@@ -153,15 +162,22 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		arg.FullName,
 		arg.Email,
 		arg.PasswordHash,
+		arg.PhoneNumber,
+		arg.Gender,
+		arg.DateOfBirth,
 		arg.Timezone,
 		arg.PreferredCurrencyCode,
 		arg.ReferralCode,
+		arg.ReferredByUserID,
 	)
 	var i CreateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.FullName,
 		&i.Email,
+		&i.PhoneNumber,
+		&i.Gender,
+		&i.DateOfBirth,
 		&i.IsEmailVerified,
 		&i.Timezone,
 		&i.PreferredCurrencyCode,
@@ -425,6 +441,32 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (Users, error) 
 	return i, err
 }
 
+const getUserByReferralCode = `-- name: GetUserByReferralCode :one
+SELECT id, full_name, email, referral_code
+FROM users
+WHERE referral_code = $1 AND deleted_at IS NULL
+LIMIT 1
+`
+
+type GetUserByReferralCodeRow struct {
+	ID           uuid.UUID   `json:"id"`
+	FullName     string      `json:"full_name"`
+	Email        string      `json:"email"`
+	ReferralCode pgtype.Text `json:"referral_code"`
+}
+
+func (q *Queries) GetUserByReferralCode(ctx context.Context, referralCode pgtype.Text) (GetUserByReferralCodeRow, error) {
+	row := q.db.QueryRow(ctx, getUserByReferralCode, referralCode)
+	var i GetUserByReferralCodeRow
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Email,
+		&i.ReferralCode,
+	)
+	return i, err
+}
+
 const getUserStreakByUserID = `-- name: GetUserStreakByUserID :one
 SELECT user_id, current_streak, longest_streak, last_streak_date, last_freeze_used_date, updated_at
 FROM user_streaks
@@ -659,8 +701,7 @@ func (q *Queries) RevokeUserToken(ctx context.Context, id uuid.UUID) error {
 
 const updateAdminMFASecret = `-- name: UpdateAdminMFASecret :exec
 UPDATE platform_admins
-SET mfa_secret_encrypted = $2,
-    mfa_enabled = false
+SET mfa_secret_encrypted = $2
 WHERE id = $1
 `
 
@@ -692,13 +733,13 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 
 const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
-SET full_name = COALESCE($2, full_name),
-    phone_number = COALESCE($3, phone_number),
-    gender = COALESCE($4, gender),
-    date_of_birth = COALESCE($5, date_of_birth),
-    timezone = COALESCE($6, timezone),
-    preferred_currency_code = COALESCE($7, preferred_currency_code),
-    avatar_url = COALESCE($8, avatar_url)
+SET full_name = $2,
+    phone_number = $3,
+    gender = $4,
+    date_of_birth = $5,
+    timezone = $6,
+    preferred_currency_code = $7,
+    avatar_url = $8
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, full_name, email, is_email_verified, password_hash, google_id, 
           phone_number, date_of_birth, gender, timezone, preferred_currency_code, 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
@@ -94,10 +95,15 @@ func (s *Service) ListCompanies(ctx context.Context) ([]store.Companies, error) 
 // AddCompanyMember invites/adds a team member or auditor to the company portal.
 func (s *Service) AddCompanyMember(ctx context.Context, companyID uuid.UUID, fullName, email string, role store.B2bRole, perm store.B2bPermission) (*store.CompanyMembers, error) {
 	mID, _ := uuid.NewV7()
+	var userUUID pgtype.UUID
+	if user, err := s.store.GetUserByEmail(ctx, strings.ToLower(strings.TrimSpace(email))); err == nil {
+		userUUID = pgtype.UUID{Bytes: user.ID, Valid: true}
+	}
+
 	member, err := s.store.CreateCompanyMember(ctx, store.CreateCompanyMemberParams{
 		ID:           mID,
 		CompanyID:    companyID,
-		UserID:       pgtype.UUID{Valid: false},
+		UserID:       userUUID,
 		InvitedEmail: email,
 		FullName:     fullName,
 		Role:         role,

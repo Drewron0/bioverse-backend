@@ -113,9 +113,19 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		return nil, errors.New("idempotency key is required")
 	}
 
+	donationType := store.DonationTypeCoralAdoption
+	if in.ProjectID == nil {
+		donationType = store.DonationTypeBioShieldAddon
+	}
+
 	existingDonation, err := s.store.GetDonationByIdempotencyKey(ctx, in.IdempotencyKey)
 	if err == nil {
-		if existingDonation.UserID != in.UserID || int(existingDonation.UnitQuantity) != in.UnitQuantity {
+		if existingDonation.UserID != in.UserID ||
+			int(existingDonation.UnitQuantity) != in.UnitQuantity ||
+			existingDonation.DonationType != donationType ||
+			existingDonation.MoneyPaymentMethod != in.PaymentMethod ||
+			existingDonation.PointsUsed != in.PointsToUse ||
+			(in.ProjectID != nil && existingDonation.ProjectID != *in.ProjectID) {
 			return nil, ErrIdempotencyKeyReused
 		}
 		return &DonationResult{
@@ -140,9 +150,8 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		}, nil
 	}
 
-	donationType := in.DonationType
-	if string(donationType) == "" {
-		donationType = store.DonationTypeCoralAdoption
+	if in.DonationType != "" {
+		donationType = in.DonationType
 	}
 
 	var grossValue decimal.Decimal
@@ -150,6 +159,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	var projectTitle string
 	var projectZoneID uuid.UUID
 	var projectSpecies string
+	var coralUnitPrice decimal.Decimal
 
 	var bioShieldPrice decimal.Decimal
 	if donationType == store.DonationTypeBioShieldAddon || in.IncludeBioShield {
@@ -213,14 +223,38 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			}
 		}
 
-		coralPricePerUnit := decimalutil.FromNumeric(project.PricePerUnitMoney)
-		coralTotal := coralPricePerUnit.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
+		coralUnitPrice = decimalutil.FromNumeric(project.PricePerUnitMoney)
+		coralTotal := coralUnitPrice.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
 
 		addedBioShield := decimal.Zero
 		if in.IncludeBioShield {
 			addedBioShield = bioShieldPrice
 		}
 		grossValue = coralTotal.Add(addedBioShield)
+	}
+
+	var sponsoredQuotaUUID pgtype.UUID
+	if in.SponsoredQuotaID != nil {
+		quota, err := s.store.GetSponsoredAdoptionQuota(ctx, *in.SponsoredQuotaID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, errors.New("sponsored quota not found")
+			}
+			return nil, fmt.Errorf("failed to fetch sponsored quota: %w", err)
+		}
+		if quota.ProjectID != projectID {
+			return nil, errors.New("sponsored quota does not match project")
+		}
+		if int(quota.TotalQuota-quota.UsedQuota) < in.UnitQuantity {
+			return nil, errors.New("insufficient sponsored adoption quota")
+		}
+		sponsoredQuotaUUID = pgtype.UUID{Bytes: *in.SponsoredQuotaID, Valid: true}
+
+		sponsoredDeduction := coralUnitPrice.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
+		grossValue = grossValue.Sub(sponsoredDeduction)
+		if grossValue.IsNegative() {
+			grossValue = decimal.Zero
+		}
 	}
 
 	// Validate target pet if bio-shield boost is involved
@@ -252,6 +286,14 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			return nil, fmt.Errorf("failed to determine points rate: %w", err)
 		}
 		pointsRate = rate
+		if pointsRate.IsPositive() && grossValue.IsPositive() {
+			maxPointsNeeded := grossValue.Div(pointsRate).Ceil().IntPart()
+			if in.PointsToUse > maxPointsNeeded {
+				in.PointsToUse = maxPointsNeeded
+			}
+		} else if grossValue.IsZero() {
+			in.PointsToUse = 0
+		}
 		pointsDiscount = decimal.NewFromInt(in.PointsToUse).Mul(pointsRate)
 		if pointsDiscount.GreaterThan(grossValue) {
 			pointsDiscount = grossValue
@@ -391,9 +433,13 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			}
 		}
 
-		var sponsoredQuotaUUID pgtype.UUID
 		if in.SponsoredQuotaID != nil {
-			sponsoredQuotaUUID = pgtype.UUID{Bytes: *in.SponsoredQuotaID, Valid: true}
+			for i := 0; i < in.UnitQuantity; i++ {
+				_, err = txStore.ClaimSponsoredQuota(ctx, *in.SponsoredQuotaID)
+				if err != nil {
+					return fmt.Errorf("failed to claim sponsored quota: %w", err)
+				}
+			}
 		}
 
 		paymentStatus := store.PaymentStatusPending
@@ -745,8 +791,11 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			return ErrDonationNotFound
 		}
 
-		if donation.PaymentStatus == store.PaymentStatusPaid {
-			return nil
+		if donation.PaymentStatus != store.PaymentStatusPending {
+			if donation.PaymentStatus == store.PaymentStatusPaid {
+				return nil
+			}
+			return fmt.Errorf("donation cannot be fulfilled from terminal status %s", donation.PaymentStatus)
 		}
 
 		// Strict settlement amount verification (gateway invoices & settles strictly in IDR)

@@ -71,7 +71,7 @@ ORDER BY cf.created_at DESC;
 
 -- name: GetCoralFragmentByID :one
 SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
-       cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
+       cf.spider_frame_id, cf.adopted_by_user_id, cf.species_name, cf.lifecycle_status, cf.health_status,
        cf.latest_photo_url, cf.planted_at, cf.last_monitored_at, cf.created_at,
        cp.title AS project_title, cz.name AS zone_name, sf.frame_code AS spider_frame_tag
 FROM coral_fragments cf

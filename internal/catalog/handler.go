@@ -50,6 +50,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware f
 	// Admin routes
 	r.Group(func(adminRouter chi.Router) {
 		adminRouter.Use(adminMiddleware)
+		adminRouter.Use(identity.RequireAdminRole("super_admin", "operations", "finance"))
 		adminRouter.Post("/v1/admin/catalog/products", h.handleAdminCreateProduct)
 		adminRouter.Put("/v1/admin/catalog/products/{id}", h.handleAdminUpdateProduct)
 		adminRouter.Post("/v1/admin/catalog/plans", h.handleAdminCreatePlan)

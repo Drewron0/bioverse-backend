@@ -3,6 +3,7 @@ package gamification_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +125,20 @@ func TestGamificationEndToEnd(t *testing.T) {
 	_, err = gamifySvc.SubmitMissionProof(ctx, userID, missionID, &petAcep.ID, "https://storage.bioverse.id/proofs/tumbler123.jpg")
 	if err == nil {
 		t.Fatalf("expected error submitting same mission on same day, got nil")
+	}
+
+	// 9. Verify pet ownership invariant
+	foreignPetID := uuid.New()
+	_, err = gamifySvc.SubmitMissionProof(ctx, userID, missionID, &foreignPetID, "https://storage.bioverse.id/proofs/tumbler123.jpg")
+	if err == nil {
+		t.Fatalf("expected error submitting proof for unowned pet, got nil")
+	}
+
+	// 10. Verify inventory ownership invariant for equipping items
+	unownedProductID := uuid.New()
+	_, err = gamifySvc.EquipPetItem(ctx, userID, petAcep.ID, unownedProductID)
+	if err == nil || !strings.Contains(err.Error(), "inventory") {
+		t.Fatalf("expected unowned item equip to fail with inventory error, got %v", err)
 	}
 
 	t.Logf("Gamification end-to-end verified successfully for user %s and pet %s", userID, petAcep.PetName)

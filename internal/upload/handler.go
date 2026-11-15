@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Drewron0/bioverse-backend/internal/identity"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/go-chi/chi/v5"
 )
@@ -29,6 +30,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMidd
 	// Administrative uploads
 	r.Route("/v1/admin/uploads", func(ar chi.Router) {
 		ar.Use(adminAuthMiddleware)
+		ar.Use(identity.RequireAdminRole("super_admin", "operations", "content"))
 		ar.Post("/presign", h.handleAdminPresign)
 	})
 }

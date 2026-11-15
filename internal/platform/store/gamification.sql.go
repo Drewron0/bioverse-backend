@@ -376,11 +376,20 @@ func (q *Queries) EquipVirtualPetProduct(ctx context.Context, arg EquipVirtualPe
 }
 
 const getLeaderboard = `-- name: GetLeaderboard :many
-SELECT id, full_name, avatar_url, points_balance,
-       ROW_NUMBER() OVER (ORDER BY points_balance DESC, created_at ASC) AS rank_position
-FROM users
-WHERE deleted_at IS NULL
-ORDER BY points_balance DESC, created_at ASC
+SELECT 
+    u.id, 
+    u.full_name, 
+    u.avatar_url, 
+    u.points_balance,
+    COALESCE(SUM(d.gross_project_value), 0)::numeric AS total_donations_usd,
+    COALESCE(SUM(d.unit_quantity), 0)::bigint AS total_units_adopted,
+    COALESCE(BOOL_OR(d.is_anonymous), false)::boolean AS is_anonymous,
+    ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(d.gross_project_value), 0) DESC, u.points_balance DESC, u.created_at ASC) AS rank_position
+FROM users u
+LEFT JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
+WHERE u.deleted_at IS NULL
+GROUP BY u.id, u.full_name, u.avatar_url, u.points_balance, u.created_at
+ORDER BY total_donations_usd DESC, u.points_balance DESC, u.created_at ASC
 LIMIT $1 OFFSET $2
 `
 
@@ -390,11 +399,14 @@ type GetLeaderboardParams struct {
 }
 
 type GetLeaderboardRow struct {
-	ID            uuid.UUID   `json:"id"`
-	FullName      string      `json:"full_name"`
-	AvatarUrl     pgtype.Text `json:"avatar_url"`
-	PointsBalance int64       `json:"points_balance"`
-	RankPosition  int64       `json:"rank_position"`
+	ID                uuid.UUID      `json:"id"`
+	FullName          string         `json:"full_name"`
+	AvatarUrl         pgtype.Text    `json:"avatar_url"`
+	PointsBalance     int64          `json:"points_balance"`
+	TotalDonationsUsd pgtype.Numeric `json:"total_donations_usd"`
+	TotalUnitsAdopted int64          `json:"total_units_adopted"`
+	IsAnonymous       bool           `json:"is_anonymous"`
+	RankPosition      int64          `json:"rank_position"`
 }
 
 func (q *Queries) GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) ([]GetLeaderboardRow, error) {
@@ -411,6 +423,9 @@ func (q *Queries) GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) 
 			&i.FullName,
 			&i.AvatarUrl,
 			&i.PointsBalance,
+			&i.TotalDonationsUsd,
+			&i.TotalUnitsAdopted,
+			&i.IsAnonymous,
 			&i.RankPosition,
 		); err != nil {
 			return nil, err

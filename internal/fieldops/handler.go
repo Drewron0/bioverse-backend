@@ -27,18 +27,89 @@ func NewHandler(svc *Service) *Handler {
 
 // RegisterRoutes mounts fieldops endpoints restricted to administrators.
 func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware func(http.Handler) http.Handler) {
-	r.Group(func(protected chi.Router) {
-		protected.Use(adminMiddleware)
+	r.Group(func(admin chi.Router) {
+		admin.Use(adminMiddleware)
 
-		// Admin Field Operations routes
-		protected.Post("/v1/admin/fieldops/operators", h.handleRegisterOperator)
-		protected.Get("/v1/admin/fieldops/operators/{id}", h.handleGetOperator)
-		protected.Post("/v1/admin/fieldops/work-logs", h.handleRecordWorkLog)
-		protected.Post("/v1/admin/fieldops/media", h.handleRecordMedia)
-		protected.Post("/v1/admin/fieldops/payouts", h.handleCreatePayout)
-		protected.Post("/v1/admin/fieldops/payouts/{id}/approve", h.handleApprovePayout)
-		protected.Post("/v1/admin/fieldops/payouts/{id}/disburse", h.handleDisbursePayout)
+		// Operations routes (operators, work-logs, media): super_admin, operations, finance
+		admin.Group(func(ops chi.Router) {
+			ops.Use(identity.RequireAdminRole("super_admin", "operations", "finance"))
+			ops.Post("/v1/admin/fieldops/operators", h.handleRegisterOperator)
+			ops.Get("/v1/admin/fieldops/operators/{id}", h.handleGetOperator)
+			ops.Post("/v1/admin/fieldops/work-logs", h.handleRecordWorkLog)
+			ops.Post("/v1/admin/fieldops/media", h.handleRecordMedia)
+		})
+
+		// Financial payout routes: super_admin, finance
+		admin.Group(func(fin chi.Router) {
+			fin.Use(identity.RequireAdminRole("super_admin", "finance"))
+			fin.Post("/v1/admin/fieldops/payouts", h.handleCreatePayout)
+			fin.Post("/v1/admin/fieldops/payouts/{id}/approve", h.handleApprovePayout)
+			fin.Post("/v1/admin/fieldops/payouts/{id}/disburse", h.handleDisbursePayout)
+		})
 	})
+}
+
+type operatorResponse struct {
+	ID                    uuid.UUID                   `json:"id"`
+	ZoneID                uuid.UUID                   `json:"zone_id"`
+	GroupID               *uuid.UUID                  `json:"group_id,omitempty"`
+	VerifiedByAdminID     *uuid.UUID                  `json:"verified_by_admin_id,omitempty"`
+	FullName              string                      `json:"full_name"`
+	CanLogin              bool                        `json:"can_login"`
+	Email                 *string                     `json:"email,omitempty"`
+	PhoneNumber           string                      `json:"phone_number"`
+	OperatorRole          store.OperatorRole          `json:"operator_role"`
+	KycStatus             store.KycVerificationStatus `json:"kyc_status"`
+	BankCode              *string                     `json:"bank_code,omitempty"`
+	BankAccountHolder     *string                     `json:"bank_account_holder,omitempty"`
+	RatePerPlantingIDR    decimal.Decimal             `json:"rate_per_planting_idr"`
+	RatePerMaintenanceIDR decimal.Decimal             `json:"rate_per_maintenance_idr"`
+	IsActive              bool                        `json:"is_active"`
+	CreatedAt             string                      `json:"created_at"`
+}
+
+func toOperatorResponse(op *store.FieldOperators) operatorResponse {
+	var groupID *uuid.UUID
+	if op.GroupID.Valid {
+		g := uuid.UUID(op.GroupID.Bytes)
+		groupID = &g
+	}
+	var verifiedBy *uuid.UUID
+	if op.VerifiedByAdminID.Valid {
+		v := uuid.UUID(op.VerifiedByAdminID.Bytes)
+		verifiedBy = &v
+	}
+	var email *string
+	if op.Email.Valid && op.Email.String != "" {
+		email = &op.Email.String
+	}
+	var bankCode *string
+	if op.BankCode.Valid && op.BankCode.String != "" {
+		bankCode = &op.BankCode.String
+	}
+	var holder *string
+	if op.BankAccountHolder.Valid && op.BankAccountHolder.String != "" {
+		holder = &op.BankAccountHolder.String
+	}
+
+	return operatorResponse{
+		ID:                    op.ID,
+		ZoneID:                op.ZoneID,
+		GroupID:               groupID,
+		VerifiedByAdminID:     verifiedBy,
+		FullName:              op.FullName,
+		CanLogin:              op.CanLogin,
+		Email:                 email,
+		PhoneNumber:           op.PhoneNumber,
+		OperatorRole:          op.OperatorRole,
+		KycStatus:             op.KycStatus,
+		BankCode:              bankCode,
+		BankAccountHolder:     holder,
+		RatePerPlantingIDR:    decimalutil.FromNumeric(op.RatePerPlantingIdr),
+		RatePerMaintenanceIDR: decimalutil.FromNumeric(op.RatePerMaintenanceIdr),
+		IsActive:              op.IsActive,
+		CreatedAt:             op.CreatedAt.Time.Format(time.RFC3339),
+	}
 }
 
 type registerOperatorRequest struct {
@@ -90,7 +161,7 @@ func (h *Handler) handleRegisterOperator(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, op)
+	writeJSON(w, http.StatusCreated, toOperatorResponse(op))
 }
 
 func (h *Handler) handleGetOperator(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +182,7 @@ func (h *Handler) handleGetOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, op)
+	writeJSON(w, http.StatusOK, toOperatorResponse(op))
 }
 
 type recordWorkLogRequest struct {

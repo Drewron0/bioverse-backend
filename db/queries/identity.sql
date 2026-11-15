@@ -18,10 +18,12 @@ LIMIT 1;
 
 -- name: CreateUser :one
 INSERT INTO users (
-    id, full_name, email, password_hash, timezone, preferred_currency_code, referral_code
+    id, full_name, email, password_hash, phone_number, gender, date_of_birth,
+    timezone, preferred_currency_code, referral_code, referred_by_user_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, full_name, email, is_email_verified, timezone, preferred_currency_code, 
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+) RETURNING id, full_name, email, phone_number, gender, date_of_birth,
+            is_email_verified, timezone, preferred_currency_code, 
             referral_code, points_balance, locked_points_balance, created_at;
 
 -- name: CreateUserStreak :one
@@ -68,13 +70,13 @@ WHERE user_id = $1 AND token_type = $2 AND revoked_at IS NULL;
 
 -- name: UpdateUserProfile :one
 UPDATE users
-SET full_name = COALESCE($2, full_name),
-    phone_number = COALESCE($3, phone_number),
-    gender = COALESCE($4, gender),
-    date_of_birth = COALESCE($5, date_of_birth),
-    timezone = COALESCE($6, timezone),
-    preferred_currency_code = COALESCE($7, preferred_currency_code),
-    avatar_url = COALESCE($8, avatar_url)
+SET full_name = $2,
+    phone_number = $3,
+    gender = $4,
+    date_of_birth = $5,
+    timezone = $6,
+    preferred_currency_code = $7,
+    avatar_url = $8
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, full_name, email, is_email_verified, password_hash, google_id, 
           phone_number, date_of_birth, gender, timezone, preferred_currency_code, 
@@ -158,8 +160,7 @@ RETURNING failed_login_count, locked_until;
 
 -- name: UpdateAdminMFASecret :exec
 UPDATE platform_admins
-SET mfa_secret_encrypted = $2,
-    mfa_enabled = false
+SET mfa_secret_encrypted = $2
 WHERE id = $1;
 
 -- name: ConfirmAdminMFA :exec
@@ -191,3 +192,9 @@ RETURNING *;
 UPDATE notifications
 SET is_read = true, read_at = NOW()
 WHERE user_id = $1 AND is_read = false;
+
+-- name: GetUserByReferralCode :one
+SELECT id, full_name, email, referral_code
+FROM users
+WHERE referral_code = $1 AND deleted_at IS NULL
+LIMIT 1;

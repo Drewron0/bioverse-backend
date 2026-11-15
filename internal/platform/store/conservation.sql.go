@@ -446,7 +446,7 @@ func (q *Queries) GetConservationZoneByID(ctx context.Context, id uuid.UUID) (Co
 
 const getCoralFragmentByID = `-- name: GetCoralFragmentByID :one
 SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
-       cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
+       cf.spider_frame_id, cf.adopted_by_user_id, cf.species_name, cf.lifecycle_status, cf.health_status,
        cf.latest_photo_url, cf.planted_at, cf.last_monitored_at, cf.created_at,
        cp.title AS project_title, cz.name AS zone_name, sf.frame_code AS spider_frame_tag
 FROM coral_fragments cf
@@ -464,6 +464,7 @@ type GetCoralFragmentByIDRow struct {
 	ProjectID       uuid.UUID                     `json:"project_id"`
 	DonationID      pgtype.UUID                   `json:"donation_id"`
 	SpiderFrameID   pgtype.UUID                   `json:"spider_frame_id"`
+	AdoptedByUserID pgtype.UUID                   `json:"adopted_by_user_id"`
 	SpeciesName     string                        `json:"species_name"`
 	LifecycleStatus FragmentLifecycleStatus       `json:"lifecycle_status"`
 	HealthStatus    NullEnvironmentalHealthStatus `json:"health_status"`
@@ -486,6 +487,7 @@ func (q *Queries) GetCoralFragmentByID(ctx context.Context, id uuid.UUID) (GetCo
 		&i.ProjectID,
 		&i.DonationID,
 		&i.SpiderFrameID,
+		&i.AdoptedByUserID,
 		&i.SpeciesName,
 		&i.LifecycleStatus,
 		&i.HealthStatus,

@@ -67,60 +67,72 @@ func (s *Service) AllocateFragments(
 ) ([]store.CreateCoralFragmentRow, error) {
 	txStore := store.New(tx)
 
-	frame, err := txStore.GetOpenSpiderFrameForZone(ctx, zoneID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	remaining := quantity
+	createdFragments := make([]store.CreateCoralFragmentRow, 0, quantity)
+
+	for remaining > 0 {
+		frame, err := txStore.GetOpenSpiderFrameForZone(ctx, zoneID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrNoOpenFrameAvailable
+			}
+			return nil, fmt.Errorf("failed to lock open spider frame: %w", err)
+		}
+
+		availableCapacity := int(frame.MaxCapacityFragments - frame.FragmentsPlanted)
+		if availableCapacity <= 0 {
 			return nil, ErrNoOpenFrameAvailable
 		}
-		return nil, fmt.Errorf("failed to lock open spider frame: %w", err)
+
+		batch := remaining
+		if batch > availableCapacity {
+			batch = availableCapacity
+		}
+
+		_, err = txStore.IncrementSpiderFrameFragmentsPlanted(ctx, store.IncrementSpiderFrameFragmentsPlantedParams{
+			ID:               frame.ID,
+			FragmentsPlanted: int32(batch),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to increment frame capacity: %w", err)
+		}
+
+		startPlantedIndex := frame.FragmentsPlanted
+
+		for i := 0; i < batch; i++ {
+			fragID, _ := uuid.NewV7()
+			fragCode := fmt.Sprintf("CF-%s-%04d", frame.FrameCode, startPlantedIndex+int32(i+1))
+
+			fragNickname := nickname
+			if fragNickname == "" {
+				fragNickname = fmt.Sprintf("Adopted Coral #%d", len(createdFragments)+1)
+			}
+
+			frag, err := txStore.CreateCoralFragment(ctx, store.CreateCoralFragmentParams{
+				ID:              fragID,
+				FragmentCode:    fragCode,
+				Nickname:        pgtype.Text{String: fragNickname, Valid: true},
+				ProjectID:       projectID,
+				DonationID:      pgtype.UUID{Bytes: donationID, Valid: true},
+				SpiderFrameID:   pgtype.UUID{Bytes: frame.ID, Valid: true},
+				AdoptedByUserID: pgtype.UUID{Bytes: userID, Valid: true},
+				SpeciesName:     speciesName,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create coral fragment record: %w", err)
+			}
+			createdFragments = append(createdFragments, frag)
+		}
+
+		remaining -= batch
 	}
 
-	availableCapacity := int(frame.MaxCapacityFragments - frame.FragmentsPlanted)
-	unitsToPlant := quantity
-	if unitsToPlant > availableCapacity {
-		unitsToPlant = availableCapacity
-	}
-
-	_, err = txStore.IncrementSpiderFrameFragmentsPlanted(ctx, store.IncrementSpiderFrameFragmentsPlantedParams{
-		ID:               frame.ID,
-		FragmentsPlanted: int32(unitsToPlant),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to increment frame capacity: %w", err)
-	}
-
-	_, err = txStore.IncrementProjectFundedUnits(ctx, store.IncrementProjectFundedUnitsParams{
-		ID:                projectID,
+	_, err := txStore.IncrementProjectFundedUnits(ctx, store.IncrementProjectFundedUnitsParams{
+		ID:               projectID,
 		FundedUnitsCount: int32(quantity),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to increment project funded units: %w", err)
-	}
-
-	createdFragments := make([]store.CreateCoralFragmentRow, 0, quantity)
-	for i := 0; i < quantity; i++ {
-		fragID, _ := uuid.NewV7()
-		fragCode := fmt.Sprintf("CF-%s-%04d", frame.FrameCode, frame.FragmentsPlanted+int32(i+1))
-
-		fragNickname := nickname
-		if fragNickname == "" {
-			fragNickname = fmt.Sprintf("Adopted Coral #%d", i+1)
-		}
-
-		frag, err := txStore.CreateCoralFragment(ctx, store.CreateCoralFragmentParams{
-			ID:                 fragID,
-			FragmentCode:       fragCode,
-			Nickname:           pgtype.Text{String: fragNickname, Valid: true},
-			ProjectID:          projectID,
-			DonationID:         pgtype.UUID{Bytes: donationID, Valid: true},
-			SpiderFrameID:      pgtype.UUID{Bytes: frame.ID, Valid: true},
-			AdoptedByUserID:    pgtype.UUID{Bytes: userID, Valid: true},
-			SpeciesName:        speciesName,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create coral fragment record: %w", err)
-		}
-		createdFragments = append(createdFragments, frag)
 	}
 
 	return createdFragments, nil

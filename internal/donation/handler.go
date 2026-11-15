@@ -376,6 +376,12 @@ func mapCursorRowToDetail(d *store.ListDonationsByUserIDWithCursorRow) donationD
 }
 
 func (h *Handler) handleGetDonation(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required.")
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	donationID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -390,6 +396,11 @@ func (h *Handler) handleGetDonation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httperr.InternalServerError(w, r)
+		return
+	}
+
+	if donation.UserID != userID {
+		httperr.NotFound(w, r, "Donation record not found.")
 		return
 	}
 

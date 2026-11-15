@@ -484,6 +484,22 @@ func (q *Queries) GetSponsoredAdoptionQuota(ctx context.Context, id uuid.UUID) (
 	return i, err
 }
 
+const linkCompanyMemberUserByEmail = `-- name: LinkCompanyMemberUserByEmail :exec
+UPDATE company_members
+SET user_id = $2
+WHERE invited_email ILIKE $1 AND user_id IS NULL
+`
+
+type LinkCompanyMemberUserByEmailParams struct {
+	InvitedEmail string      `json:"invited_email"`
+	UserID       pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) LinkCompanyMemberUserByEmail(ctx context.Context, arg LinkCompanyMemberUserByEmailParams) error {
+	_, err := q.db.Exec(ctx, linkCompanyMemberUserByEmail, arg.InvitedEmail, arg.UserID)
+	return err
+}
+
 const listActiveB2BPackages = `-- name: ListActiveB2BPackages :many
 SELECT id, sku_code, name, package_type, currency_code, price_amount, spider_frames_count, coral_fragments_count, tree_seedlings_count, includes_plaque, includes_dashboard, is_active, created_at FROM b2b_packages
 WHERE is_active = true
