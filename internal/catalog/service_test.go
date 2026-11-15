@@ -33,7 +33,7 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 	})
 
 	queries := store.New(pool)
-	catalogSvc := catalog.NewService(pool, queries)
+	catalogSvc := catalog.NewService(pool, queries, false)
 	identitySvc := identity.NewService(pool, queries, cfg, nil, nil)
 
 	// 1. Register test user
@@ -151,8 +151,21 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 	if sub.PlanName == "" {
 		t.Errorf("expected plan name to be populated")
 	}
-	if sub.AuthorizationURL == nil || *sub.AuthorizationURL == "" {
-		t.Errorf("expected authorization URL to be present")
+	if sub.AuthorizationURL != nil {
+		t.Errorf("expected authorization URL to be nil without payment gateway integration, got %v", *sub.AuthorizationURL)
+	}
+
+	// 10b. Verify production gating prevents unauthenticated subscriptions
+	prodSvc := catalog.NewService(pool, queries, true)
+	_, err = prodSvc.SubscribePlan(ctx, catalog.CreateSubscriptionInput{
+		UserID:            userID,
+		PlanID:            plans[0].ID,
+		ProjectID:         seededProjectID,
+		UnitQuantity:      1,
+		PaymentMethodType: store.PaymentMethodTypeEwallet,
+	})
+	if !errors.Is(err, catalog.ErrSubscriptionNotAvailableInProduction) {
+		t.Errorf("expected ErrSubscriptionNotAvailableInProduction in production, got %v", err)
 	}
 
 	// 11. Test Subscription State Machine: Pause -> Resume -> Cancel

@@ -209,6 +209,9 @@ func Load() (*Config, error) {
 		if cfg.Payment.XenditWebhookToken == "webhook_verification_token_placeholder" || strings.TrimSpace(cfg.Payment.XenditWebhookToken) == "" {
 			return nil, fmt.Errorf("insecure or missing XENDIT_WEBHOOK_TOKEN configured for %s environment", cfg.App.Environment)
 		}
+		if strings.TrimSpace(cfg.CV.ServiceURL) == "" {
+			return nil, fmt.Errorf("missing CV_SERVICE_URL configured for %s environment", cfg.App.Environment)
+		}
 	}
 
 	return cfg, nil

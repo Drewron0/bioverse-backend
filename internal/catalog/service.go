@@ -38,6 +38,8 @@ var (
 	ErrInvalidSubscriptionState = errors.New("invalid subscription status transition")
 	// ErrIAPNotConfiguredInProduction indicates real-time App Store verification is not enabled in production.
 	ErrIAPNotConfiguredInProduction = errors.New("in-app purchase verification is disabled in production without server credentials")
+	// ErrSubscriptionNotAvailableInProduction indicates recurring subscription checkout is disabled in production without payment tokenization.
+	ErrSubscriptionNotAvailableInProduction = errors.New("recurring subscription payment is disabled until gateway integration is configured")
 )
 
 // CurrencyPrice represents currency code and decimal amount as formatted string.
@@ -104,16 +106,17 @@ type Service struct {
 }
 
 // NewService constructs a new catalog service.
-func NewService(pool *pgxpool.Pool, q store.Querier, isProduction ...bool) *Service {
-	isProd := false
-	if len(isProduction) > 0 {
-		isProd = isProduction[0]
-	}
+func NewService(pool *pgxpool.Pool, q store.Querier, isProduction bool) *Service {
 	return &Service{
 		pool:         pool,
 		store:        q,
-		isProduction: isProd,
+		isProduction: isProduction,
 	}
+}
+
+// IsProduction reports whether the service is running in production mode.
+func (s *Service) IsProduction() bool {
+	return s.isProduction
 }
 
 // ListDigitalProducts returns all active products with attributes as JSON objects and prices array.
@@ -423,6 +426,10 @@ func (s *Service) ConsumeStreakFreeze(ctx context.Context, userID uuid.UUID) err
 
 // SubscribePlan creates a recurring maintenance subscription with payment authorization URL.
 func (s *Service) SubscribePlan(ctx context.Context, in CreateSubscriptionInput) (*SubscriptionDetailDTO, error) {
+	if s.isProduction {
+		return nil, ErrSubscriptionNotAvailableInProduction
+	}
+
 	if in.UnitQuantity <= 0 {
 		in.UnitQuantity = 1
 	}
@@ -484,14 +491,13 @@ func (s *Service) SubscribePlan(ctx context.Context, in CreateSubscriptionInput)
 		return nil, fmt.Errorf("failed to create subscription: %w", err)
 	}
 
-	authURL := fmt.Sprintf("https://checkout.xendit.co/v2/sub_%s", subID)
 	return &SubscriptionDetailDTO{
 		ID:               sub.ID,
 		Status:           sub.Status,
 		PlanName:         plan.Name,
 		BillingInterval:  plan.BillingInterval,
 		NextBillingDate:  nextBillingDate.Time,
-		AuthorizationURL: &authURL,
+		AuthorizationURL: nil,
 		CreatedAt:        sub.CreatedAt.Time,
 	}, nil
 }
@@ -505,14 +511,13 @@ func (s *Service) ListUserSubscriptions(ctx context.Context, userID uuid.UUID) (
 
 	dtos := make([]SubscriptionDetailDTO, 0, len(rows))
 	for _, row := range rows {
-		authURL := fmt.Sprintf("https://checkout.xendit.co/v2/sub_%s", row.ID)
 		dtos = append(dtos, SubscriptionDetailDTO{
 			ID:               row.ID,
 			Status:           row.Status,
 			PlanName:         row.PlanName.String,
 			BillingInterval:  row.Frequency,
 			NextBillingDate:  row.NextBillingDate.Time,
-			AuthorizationURL: &authURL,
+			AuthorizationURL: nil,
 			CreatedAt:        row.CreatedAt.Time,
 		})
 	}

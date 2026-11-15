@@ -194,7 +194,12 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		donationHandler := donation.NewHandler(donationService, cfg.Payment.XenditWebhookToken, isDev)
 		donationHandler.RegisterRoutes(r, userAuthMiddleware)
 
-		cvVerifier := gamification.NewHTTPCVVerifier(cfg.CV.ServiceURL)
+		var cvVerifier gamification.ComputerVisionVerifier
+		if cfg.CV.ServiceURL != "" {
+			cvVerifier = gamification.NewHTTPCVVerifier(cfg.CV.ServiceURL)
+		} else {
+			cvVerifier = &gamification.StubCVVerifier{}
+		}
 		gamificationService := gamification.NewService(db, queries, cvVerifier)
 		gamificationHandler := gamification.NewHandler(gamificationService)
 		gamificationHandler.RegisterRoutes(r, userAuthMiddleware)

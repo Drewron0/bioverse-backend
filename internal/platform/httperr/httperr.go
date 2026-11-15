@@ -88,6 +88,11 @@ func ServiceUnavailable(w http.ResponseWriter, r *http.Request, detail string) {
 	Respond(w, r, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Service Unavailable", detail, nil)
 }
 
+// ServiceUnavailableWithCode writes a 503 Service Unavailable problem response with custom error code.
+func ServiceUnavailableWithCode(w http.ResponseWriter, r *http.Request, code, detail string) {
+	Respond(w, r, http.StatusServiceUnavailable, code, "Service Unavailable", detail, nil)
+}
+
 // InternalServerError writes a 500 Internal Server Error problem response.
 func InternalServerError(w http.ResponseWriter, r *http.Request) {
 	Respond(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal Server Error", "An unexpected error occurred.", nil)

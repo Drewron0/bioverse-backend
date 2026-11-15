@@ -176,6 +176,11 @@ type createSubscriptionRequest struct {
 }
 
 func (h *Handler) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
+	if h.service.IsProduction() {
+		httperr.ServiceUnavailableWithCode(w, r, "NOT_AVAILABLE", "Recurring subscriptions are disabled in production until payment gateway tokenization is configured")
+		return
+	}
+
 	userID, ok := identity.GetUserIDFromContext(r.Context())
 	if !ok {
 		httperr.Unauthorized(w, r, "Authentication required")
@@ -203,6 +208,10 @@ func (h *Handler) handleCreateSubscription(w http.ResponseWriter, r *http.Reques
 		PaymentMethodType: req.PaymentMethodType,
 	})
 	if err != nil {
+		if errors.Is(err, ErrSubscriptionNotAvailableInProduction) {
+			httperr.ServiceUnavailableWithCode(w, r, "NOT_AVAILABLE", "Recurring subscriptions are disabled in production until payment gateway tokenization is configured")
+			return
+		}
 		if errors.Is(err, ErrPlanNotFound) {
 			httperr.NotFound(w, r, "Subscription plan not found")
 			return
@@ -268,7 +277,7 @@ func (h *Handler) handleVerifyIAPReceipt(w http.ResponseWriter, r *http.Request)
 	})
 	if err != nil {
 		if errors.Is(err, ErrIAPNotConfiguredInProduction) {
-			httperr.ServiceUnavailable(w, r, "In-app purchase receipt verification is disabled in production without server credentials")
+			httperr.ServiceUnavailableWithCode(w, r, "NOT_AVAILABLE", "In-app purchase receipt verification is disabled in production without server credentials")
 			return
 		}
 		if errors.Is(err, ErrProductNotFound) {

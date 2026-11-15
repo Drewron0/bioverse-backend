@@ -89,11 +89,10 @@ func NewHTTPCVVerifier(serviceURL string) *HTTPCVVerifier {
 	}
 }
 
-// VerifyProof evaluates proof images with external CV service if configured, or falls back to stub.
+// VerifyProof evaluates proof images with external CV service and returns an error if service is unconfigured or unreachable.
 func (v *HTTPCVVerifier) VerifyProof(ctx context.Context, targetLabel string, minConfidence decimal.Decimal, imageURL string) (CVResult, error) {
 	if v.serviceURL == "" {
-		stub := &StubCVVerifier{}
-		return stub.VerifyProof(ctx, targetLabel, minConfidence, imageURL)
+		return CVResult{}, errors.New("cv inference service url is not configured")
 	}
 
 	payload, _ := json.Marshal(map[string]any{
