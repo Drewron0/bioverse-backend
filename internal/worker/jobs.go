@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -92,15 +94,61 @@ func (j *JobRunner) ProcessExpiredDonations(ctx context.Context, batchSize int32
 	return processedCount, nil
 }
 
-// ProcessDueSubscriptions scans for recurring subscriptions that are due for billing.
-// In environments where automated tokenized billing is enabled, it generates renewal charges.
-// When tokenization is disabled/gated, it monitors due subscriptions and logs audit statistics.
+// ProcessDueSubscriptions scans for recurring subscriptions that are due for billing and advances their cycle.
 func (j *JobRunner) ProcessDueSubscriptions(ctx context.Context, batchSize int32) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 50
 	}
-	// Currently subscription creation returns 503 until payment gateway tokenization is configured.
-	// This background job runs periodically to ensure overdue subscriptions are monitored.
-	j.logger.Debug("subscription billing check cycle completed", slog.Int("processed_count", 0))
-	return 0, nil
+
+	today := pgtype.Date{
+		Time:  time.Now().UTC(),
+		Valid: true,
+	}
+
+	dueSubs, err := j.store.ListDueSubscriptions(ctx, store.ListDueSubscriptionsParams{
+		NextBillingDate: today,
+		Limit:           batchSize,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list due subscriptions: %w", err)
+	}
+
+	processedCount := 0
+	for _, sub := range dueSubs {
+		err := database.WithTx(ctx, j.pool, func(tx pgx.Tx) error {
+			txStore := store.New(tx)
+
+			nextBilling := time.Now().UTC().AddDate(0, 1, 0)
+			if sub.Frequency == store.SubscriptionFrequencyWeekly {
+				nextBilling = time.Now().UTC().AddDate(0, 0, 7)
+			} else if sub.Frequency == store.SubscriptionFrequencyYearly {
+				nextBilling = time.Now().UTC().AddDate(1, 0, 0)
+			}
+
+			nextDate := pgtype.Date{
+				Time:  time.Date(nextBilling.Year(), nextBilling.Month(), nextBilling.Day(), 0, 0, 0, 0, time.UTC),
+				Valid: true,
+			}
+
+			_, err := txStore.AdvanceSubscriptionBillingCycle(ctx, store.AdvanceSubscriptionBillingCycleParams{
+				ID:              sub.ID,
+				NextBillingDate: nextDate,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to advance subscription billing cycle: %w", err)
+			}
+
+			return nil
+		})
+		if err != nil {
+			j.logger.Error("failed to process due subscription", slog.String("subscription_id", sub.ID.String()), slog.String("error", err.Error()))
+			continue
+		}
+		processedCount++
+	}
+
+	if processedCount > 0 {
+		j.logger.Info("subscription billing check cycle completed", slog.Int("processed_count", processedCount))
+	}
+	return processedCount, nil
 }

@@ -181,11 +181,11 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 
 		conservationService := conservation.NewService(db, queries)
 		conservationHandler := conservation.NewHandler(conservationService)
-		conservationHandler.RegisterRoutes(r, userAuthMiddleware)
+		conservationHandler.RegisterRoutes(r, userAuthMiddleware, adminAuthMiddleware)
 
 		catalogService := catalog.NewService(db, queries, cfg.App.Environment == "production")
 		catalogHandler := catalog.NewHandler(catalogService)
-		catalogHandler.RegisterRoutes(r, userAuthMiddleware)
+		catalogHandler.RegisterRoutes(r, userAuthMiddleware, adminAuthMiddleware)
 
 		xenditGateway := payment.NewXenditClient(cfg.Payment.XenditSecretKey, log)
 
@@ -202,7 +202,7 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		}
 		gamificationService := gamification.NewService(db, queries, cvVerifier)
 		gamificationHandler := gamification.NewHandler(gamificationService)
-		gamificationHandler.RegisterRoutes(r, userAuthMiddleware)
+		gamificationHandler.RegisterRoutes(r, userAuthMiddleware, adminAuthMiddleware)
 
 		fieldopsService := fieldops.NewService(db, queries, cfg.Auth.AppEncryptionKey, cfg.Auth.HMACSecret)
 		fieldopsHandler := fieldops.NewHandler(fieldopsService)
@@ -210,7 +210,7 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 
 		b2bService := b2b.NewService(db, queries)
 		b2bHandler := b2b.NewHandler(b2bService)
-		b2bHandler.RegisterRoutes(r, adminAuthMiddleware)
+		b2bHandler.RegisterRoutes(r, adminAuthMiddleware, userAuthMiddleware)
 	}
 
 	return r

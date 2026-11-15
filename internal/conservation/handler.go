@@ -10,8 +10,10 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/identity"
 	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // Handler serves HTTP endpoints for conservation projects and adopted fragments.
@@ -25,7 +27,7 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // RegisterRoutes registers conservation routes on the router.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware func(http.Handler) http.Handler) {
 	r.Route("/v1/app/conservation", func(cr chi.Router) {
 		cr.Get("/projects", h.handleListProjects)
 		cr.Get("/projects/{id}", h.handleGetProject)
@@ -40,6 +42,20 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 
 	r.Get("/v1/app/impact/summary", h.handleGetImpactSummary)
 	r.Get("/v1/app/news", h.handleListNews)
+
+	r.Group(func(adminRouter chi.Router) {
+		adminRouter.Use(adminMiddleware)
+		adminRouter.Post("/v1/admin/conservation/zones", h.handleAdminCreateZone)
+		adminRouter.Get("/v1/admin/conservation/zones", h.handleAdminListZones)
+		adminRouter.Put("/v1/admin/conservation/zones/{id}", h.handleAdminUpdateZone)
+		adminRouter.Post("/v1/admin/conservation/projects", h.handleAdminCreateProject)
+		adminRouter.Put("/v1/admin/conservation/projects/{id}", h.handleAdminUpdateProject)
+		adminRouter.Post("/v1/admin/conservation/frames", h.handleAdminCreateFrame)
+		adminRouter.Get("/v1/admin/conservation/frames", h.handleAdminListFrames)
+		adminRouter.Post("/v1/admin/content/news", h.handleAdminCreateNews)
+		adminRouter.Put("/v1/admin/content/news/{id}", h.handleAdminUpdateNews)
+		adminRouter.Delete("/v1/admin/content/news/{id}", h.handleAdminDeleteNews)
+	})
 }
 
 type projectResponse struct {
@@ -450,4 +466,302 @@ func (h *Handler) handleListNews(w http.ResponseWriter, r *http.Request) {
 		"items":       items,
 		"next_cursor": nil,
 	})
+}
+
+type createZoneRequest struct {
+	Name           string                   `json:"name"`
+	Region         string                   `json:"region"`
+	Province       string                   `json:"province"`
+	EcosystemType  store.EcosystemKind      `json:"ecosystem_type"`
+	AllocationType store.ZoneAllocationType `json:"allocation_type"`
+	Latitude       decimal.Decimal          `json:"latitude"`
+	Longitude      decimal.Decimal          `json:"longitude"`
+	MinDepthMeters *decimal.Decimal         `json:"min_depth_meters,omitempty"`
+	MaxDepthMeters *decimal.Decimal         `json:"max_depth_meters,omitempty"`
+}
+
+func (h *Handler) handleAdminCreateZone(w http.ResponseWriter, r *http.Request) {
+	var req createZoneRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.Name == "" || req.Region == "" || req.Province == "" {
+		httperr.BadRequest(w, r, "name, region, and province are required", nil)
+		return
+	}
+	if req.AllocationType == "" {
+		req.AllocationType = store.ZoneAllocationTypeB2cPool
+	}
+	if req.EcosystemType == "" {
+		req.EcosystemType = store.EcosystemKindMarineCoral
+	}
+
+	z, err := h.service.CreateZone(r.Context(), req.Name, req.Region, req.Province, req.EcosystemType, req.AllocationType, req.Latitude, req.Longitude, req.MinDepthMeters, req.MaxDepthMeters)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, z)
+}
+
+func (h *Handler) handleAdminListZones(w http.ResponseWriter, r *http.Request) {
+	zones, err := h.service.ListZones(r.Context())
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, zones)
+}
+
+func (h *Handler) handleAdminUpdateZone(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	zID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid zone UUID", nil)
+		return
+	}
+
+	var req createZoneRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	z, err := h.service.UpdateZone(r.Context(), zID, req.Name, req.Region, req.Province, req.EcosystemType, req.AllocationType, req.Latitude, req.Longitude, req.MinDepthMeters, req.MaxDepthMeters)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, z)
+}
+
+type createProjectRequest struct {
+	ZoneID                uuid.UUID             `json:"zone_id"`
+	Title                 string                `json:"title"`
+	Description           string                `json:"description"`
+	Objectives            string                `json:"objectives"`
+	Category              store.ProjectCategory `json:"category"`
+	SpeciesOrTypeName     string                `json:"species_or_type_name"`
+	ImageURL              string                `json:"image_url"`
+	UnitName              string                `json:"unit_name"`
+	CurrencyCode          string                `json:"currency_code"`
+	PricePerUnitMoney     decimal.Decimal       `json:"price_per_unit_money"`
+	PricePerUnitPoints    int64                 `json:"price_per_unit_points"`
+	TargetUnits           int32                 `json:"target_units"`
+	TargetAmount          decimal.Decimal       `json:"target_amount"`
+	ReplantReservePct     decimal.Decimal       `json:"replant_reserve_pct"`
+	DonationStartDate     string                `json:"donation_start_date"`
+	DonationEndDate       string                `json:"donation_end_date"`
+	EstimatedPlantingDate string                `json:"estimated_planting_date"`
+}
+
+func (h *Handler) handleAdminCreateProject(w http.ResponseWriter, r *http.Request) {
+	var req createProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.Title == "" || req.ZoneID == uuid.Nil {
+		httperr.BadRequest(w, r, "title and zone_id are required", nil)
+		return
+	}
+
+	startDate, _ := time.Parse("2006-01-02", req.DonationStartDate)
+	if startDate.IsZero() {
+		startDate = time.Now().UTC()
+	}
+	endDate, _ := time.Parse("2006-01-02", req.DonationEndDate)
+	if endDate.IsZero() {
+		endDate = startDate.AddDate(0, 6, 0)
+	}
+	plantDate, _ := time.Parse("2006-01-02", req.EstimatedPlantingDate)
+	if plantDate.IsZero() {
+		plantDate = endDate.AddDate(0, 1, 0)
+	}
+
+	p, err := h.service.CreateProject(r.Context(), CreateProjectInput{
+		ZoneID:                req.ZoneID,
+		Title:                 req.Title,
+		Description:           req.Description,
+		Objectives:            req.Objectives,
+		Category:              req.Category,
+		SpeciesOrTypeName:     req.SpeciesOrTypeName,
+		ImageURL:              req.ImageURL,
+		UnitName:              req.UnitName,
+		CurrencyCode:          req.CurrencyCode,
+		PricePerUnitMoney:     req.PricePerUnitMoney,
+		PricePerUnitPoints:    req.PricePerUnitPoints,
+		TargetUnits:           req.TargetUnits,
+		TargetAmount:          req.TargetAmount,
+		ReplantReservePct:     req.ReplantReservePct,
+		DonationStartDate:     startDate,
+		DonationEndDate:       endDate,
+		EstimatedPlantingDate: plantDate,
+	})
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, p)
+}
+
+type updateProjectRequest struct {
+	Title                string                          `json:"title"`
+	Description          string                          `json:"description"`
+	Objectives           string                          `json:"objectives"`
+	Status               store.ProjectStatus             `json:"status"`
+	PhysicalHealthStatus store.EnvironmentalHealthStatus `json:"physical_health_status"`
+	PricePerUnitMoney    decimal.Decimal                 `json:"price_per_unit_money"`
+	PricePerUnitPoints   int64                           `json:"price_per_unit_points"`
+}
+
+func (h *Handler) handleAdminUpdateProject(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	pID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid project UUID", nil)
+		return
+	}
+
+	var req updateProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	p, err := h.service.UpdateProject(r.Context(), pID, req.Title, req.Description, req.Objectives, req.Status, req.PhysicalHealthStatus, req.PricePerUnitMoney, req.PricePerUnitPoints)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, p)
+}
+
+type createFrameRequest struct {
+	FrameCode   string          `json:"frame_code"`
+	ZoneID      uuid.UUID       `json:"zone_id"`
+	CompanyID   *uuid.UUID      `json:"company_id,omitempty"`
+	DepthMeters decimal.Decimal `json:"depth_meters"`
+	Latitude    decimal.Decimal `json:"latitude"`
+	Longitude   decimal.Decimal `json:"longitude"`
+	MaxCapacity int32           `json:"max_capacity"`
+}
+
+func (h *Handler) handleAdminCreateFrame(w http.ResponseWriter, r *http.Request) {
+	var req createFrameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.FrameCode == "" || req.ZoneID == uuid.Nil {
+		httperr.BadRequest(w, r, "frame_code and zone_id are required", nil)
+		return
+	}
+
+	sf, err := h.service.CreateSpiderFrame(r.Context(), req.FrameCode, req.ZoneID, req.CompanyID, req.DepthMeters, req.Latitude, req.Longitude, req.MaxCapacity)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, sf)
+}
+
+func (h *Handler) handleAdminListFrames(w http.ResponseWriter, r *http.Request) {
+	zoneIDStr := r.URL.Query().Get("zone_id")
+	zoneID, err := uuid.Parse(zoneIDStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Valid zone_id query param required", nil)
+		return
+	}
+
+	frames, err := h.service.ListSpiderFrames(r.Context(), zoneID)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, frames)
+}
+
+type createNewsRequest struct {
+	Title        string                `json:"title"`
+	Category     store.ProjectCategory `json:"category"`
+	Summary      string                `json:"summary"`
+	Content      string                `json:"content"`
+	ThumbnailURL string                `json:"thumbnail_url"`
+	IsFeatured   bool                  `json:"is_featured"`
+}
+
+func (h *Handler) handleAdminCreateNews(w http.ResponseWriter, r *http.Request) {
+	var req createNewsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.Title == "" || req.Summary == "" {
+		httperr.BadRequest(w, r, "title and summary are required", nil)
+		return
+	}
+	if req.Category == "" {
+		req.Category = store.ProjectCategoryCoral
+	}
+
+	n, err := h.service.CreateNews(r.Context(), req.Title, req.Category, req.Summary, req.Content, req.ThumbnailURL, req.IsFeatured)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, n)
+}
+
+func (h *Handler) handleAdminUpdateNews(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	nID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid news UUID", nil)
+		return
+	}
+
+	var req createNewsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	n, err := h.service.UpdateNews(r.Context(), nID, req.Title, req.Category, req.Summary, req.Content, req.ThumbnailURL, req.IsFeatured)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, n)
+}
+
+func (h *Handler) handleAdminDeleteNews(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	nID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid news UUID", nil)
+		return
+	}
+
+	if err := h.service.DeleteNews(r.Context(), nID); err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "News article deleted"})
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
 }

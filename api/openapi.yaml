@@ -47,6 +47,16 @@ tags:
     description: Operator KYC, work logs, milestone photo evidence, and multi-step payouts (Phase 8 - Admin)
   - name: Admin B2B & ESG
     description: Corporate ESG contracts, quota management, and audit reports (Phase 9 - Admin)
+  - name: Notifications
+    description: In-app user notifications and read receipts
+  - name: B2B Portal
+    description: Corporate client web portal dashboard and ESG compliance reports
+  - name: Admin Conservation
+    description: Back-office administration of conservation zones, projects, and spider frames
+  - name: Admin Catalog
+    description: Back-office management of digital items and subscription plans
+  - name: Admin Gamification
+    description: Back-office management of eco-missions and rewards
   - name: Webhooks
     description: External payment gateway callbacks and automated reconciliations
 
@@ -425,6 +435,92 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '429':
           $ref: '#/components/responses/TooManyRequestsError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/notifications:
+    get:
+      tags:
+        - Notifications
+      summary: List user notifications
+      description: Retrieves recent in-app notifications for the authenticated user.
+      operationId: listUserNotifications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of user notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationItem'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/notifications/{id}/read:
+    patch:
+      tags:
+        - Notifications
+      summary: Mark notification as read
+      description: Marks a specific notification as read for the authenticated user.
+      operationId: markNotificationRead
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Notification UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationItem'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/notifications/read-all:
+    post:
+      tags:
+        - Notifications
+      summary: Mark all notifications as read
+      description: Marks all unread notifications for the authenticated user as read.
+      operationId: markAllNotificationsRead
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: All notifications marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2222,6 +2318,606 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/EsgReportDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/b2b/dashboard:
+    get:
+      tags:
+        - B2B Portal
+      summary: Corporate client dashboard metrics
+      description: Retrieves corporate dashboard summary including annual target progress, quota usage, and POJK 51 readiness for the authenticated member's company.
+      operationId: getCorporateDashboard
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Corporate dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorporateDashboard'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/b2b/reports:
+    get:
+      tags:
+        - B2B Portal
+      summary: List corporate ESG compliance reports
+      description: Retrieves published ESG audit reports for the authenticated member's company.
+      operationId: listCorporateReports
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of corporate ESG reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EsgReportDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/conservation/zones:
+    post:
+      tags:
+        - Admin Conservation
+      summary: Create conservation zone
+      description: Creates a new restoration zone (coral reef, mangrove, or terrestrial).
+      operationId: adminCreateZone
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateZoneRequest'
+      responses:
+        '201':
+          description: Zone created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConservationZone'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      tags:
+        - Admin Conservation
+      summary: List all conservation zones
+      description: Retrieves all configured conservation zones.
+      operationId: adminListZones
+      security:
+        - AdminBearerAuth: []
+      responses:
+        '200':
+          description: List of conservation zones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConservationZone'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/conservation/zones/{id}:
+    put:
+      tags:
+        - Admin Conservation
+      summary: Update conservation zone
+      description: Updates geographic boundaries or configuration of a conservation zone.
+      operationId: adminUpdateZone
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Zone UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateZoneRequest'
+      responses:
+        '200':
+          description: Updated conservation zone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConservationZone'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/conservation/projects:
+    post:
+      tags:
+        - Admin Conservation
+      summary: Create conservation project
+      description: Creates a new restoration project campaign with target unit counts and monetary pricing.
+      operationId: adminCreateProject
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConservationProjectRequest'
+      responses:
+        '201':
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConservationProject'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/conservation/projects/{id}:
+    put:
+      tags:
+        - Admin Conservation
+      summary: Update conservation project
+      description: Updates status, physical health, pricing, or details of a project.
+      operationId: adminUpdateProject
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConservationProjectRequest'
+      responses:
+        '200':
+          description: Updated conservation project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConservationProject'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/conservation/frames:
+    post:
+      tags:
+        - Admin Conservation
+      summary: Create spider frame
+      description: Registers a new spider frame for coral propagation within a conservation zone.
+      operationId: adminCreateFrame
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSpiderFrameRequest'
+      responses:
+        '201':
+          description: Frame created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpiderFrame'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      tags:
+        - Admin Conservation
+      summary: List spider frames by zone
+      description: Retrieves all spider frames placed in a specific conservation zone.
+      operationId: adminListFrames
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: zone_id
+          in: query
+          required: true
+          description: Zone UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of spider frames
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpiderFrame'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/content/news:
+    post:
+      tags:
+        - Admin Conservation
+      summary: Create news article
+      description: Publishes an educational or conservation update article.
+      operationId: adminCreateNews
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNewsRequest'
+      responses:
+        '201':
+          description: Article created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsArticle'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/content/news/{id}:
+    put:
+      tags:
+        - Admin Conservation
+      summary: Update news article
+      description: Updates content, summary, or category of a published article.
+      operationId: adminUpdateNews
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Article UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNewsRequest'
+      responses:
+        '200':
+          description: Updated article
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsArticle'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+        - Admin Conservation
+      summary: Delete news article
+      description: Permanently removes a published news article.
+      operationId: adminDeleteNews
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Article UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Article deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/catalog/products:
+    post:
+      tags:
+        - Admin Catalog
+      summary: Create digital product
+      description: Creates a new digital cosmetic or booster item in the shop catalog.
+      operationId: adminCreateProduct
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCatalogProductRequest'
+      responses:
+        '201':
+          description: Product created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DigitalProduct'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/catalog/products/{id}:
+    put:
+      tags:
+        - Admin Catalog
+      summary: Update digital product
+      description: Updates pricing, active status, or metadata of a digital shop item.
+      operationId: adminUpdateProduct
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Product UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCatalogProductRequest'
+      responses:
+        '200':
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DigitalProduct'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/catalog/plans:
+    post:
+      tags:
+        - Admin Catalog
+      summary: Create subscription plan
+      description: Creates a recurring maintenance or membership subscription plan.
+      operationId: adminCreatePlan
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionPlanRequest'
+      responses:
+        '201':
+          description: Plan created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPlan'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/catalog/plans/{id}:
+    put:
+      tags:
+        - Admin Catalog
+      summary: Update subscription plan
+      description: Updates active status or description of a subscription plan.
+      operationId: adminUpdatePlan
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Plan UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubscriptionPlanRequest'
+      responses:
+        '200':
+          description: Updated subscription plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPlan'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/gamification/missions:
+    post:
+      tags:
+        - Admin Gamification
+      summary: Create eco-mission
+      description: Creates an action-based eco-mission with reward points, XP, and verification requirements.
+      operationId: adminCreateMission
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEcoMissionRequest'
+      responses:
+        '201':
+          description: Mission created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EcoMission'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/gamification/missions/{id}:
+    put:
+      tags:
+        - Admin Gamification
+      summary: Update eco-mission
+      description: Updates reward values, active status, or instructions for an eco-mission.
+      operationId: adminUpdateMission
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Mission UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEcoMissionRequest'
+      responses:
+        '200':
+          description: Updated eco-mission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EcoMission'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '403':
@@ -4520,3 +5216,489 @@ components:
         paid_at:
           type: string
           format: date-time
+
+    NotificationItem:
+      type: object
+      required:
+        - id
+        - title
+        - body
+        - notification_type
+        - is_read
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Mission Verified!
+        body:
+          type: string
+          example: Your mangrove planting proof was approved. You earned 200 points.
+        notification_type:
+          type: string
+          example: mission_verified
+        reference_type:
+          type: string
+          nullable: true
+          example: mission_submission
+        reference_id:
+          type: string
+          format: uuid
+          nullable: true
+        is_read:
+          type: boolean
+          example: false
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CorporateDashboard:
+      type: object
+      required:
+        - company_id
+        - legal_name
+        - annual_fragment_target
+        - total_sponsored_quota
+        - used_sponsored_quota
+        - remaining_quota
+        - pojk51_readiness_pct
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        legal_name:
+          type: string
+          example: PT Samudera Lestari TBK
+        annual_fragment_target:
+          type: integer
+          example: 1000
+        total_sponsored_quota:
+          type: integer
+          example: 500
+        used_sponsored_quota:
+          type: integer
+          example: 120
+        remaining_quota:
+          type: integer
+          example: 380
+        pojk51_readiness_pct:
+          type: string
+          example: "85.50"
+
+    ConservationZone:
+      type: object
+      required:
+        - id
+        - name
+        - region
+        - province
+        - ecosystem_type
+        - allocation_type
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: North Reef Restoration Area
+        region:
+          type: string
+          example: Bunaken
+        province:
+          type: string
+          example: North Sulawesi
+        ecosystem_type:
+          type: string
+          enum: [marine_coral, mangrove, terrestrial]
+          example: marine_coral
+        allocation_type:
+          type: string
+          enum: [b2c_pool, b2b_dedicated, mixed]
+          example: b2c_pool
+        latitude:
+          type: string
+          example: "1.614500"
+        longitude:
+          type: string
+          example: "124.758800"
+        min_depth_meters:
+          type: string
+          example: "5.0"
+        max_depth_meters:
+          type: string
+          example: "15.0"
+        created_at:
+          type: string
+          format: date-time
+
+    SpiderFrame:
+      type: object
+      required:
+        - id
+        - frame_code
+        - zone_id
+        - max_capacity_fragments
+        - fragments_planted
+      properties:
+        id:
+          type: string
+          format: uuid
+        frame_code:
+          type: string
+          example: BNK-001
+        zone_id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        depth_meters:
+          type: string
+          example: "8.5"
+        latitude:
+          type: string
+          example: "1.614500"
+        longitude:
+          type: string
+          example: "124.758800"
+        max_capacity_fragments:
+          type: integer
+          example: 15
+        fragments_planted:
+          type: integer
+          example: 6
+        physical_health_status:
+          $ref: '#/components/schemas/EnvironmentalHealthStatus'
+
+    CreateZoneRequest:
+      type: object
+      required:
+        - name
+        - region
+        - province
+      properties:
+        name:
+          type: string
+          example: North Reef Restoration Area
+        region:
+          type: string
+          example: Bunaken
+        province:
+          type: string
+          example: North Sulawesi
+        ecosystem_type:
+          type: string
+          enum: [marine_coral, mangrove, terrestrial]
+          default: marine_coral
+        allocation_type:
+          type: string
+          enum: [b2c_pool, b2b_dedicated, mixed]
+          default: b2c_pool
+        latitude:
+          type: number
+          example: 1.6145
+        longitude:
+          type: number
+          example: 124.7588
+        min_depth_meters:
+          type: number
+          example: 5.0
+        max_depth_meters:
+          type: number
+          example: 15.0
+
+    CreateConservationProjectRequest:
+      type: object
+      required:
+        - zone_id
+        - title
+        - description
+        - objectives
+        - category
+        - species_or_type_name
+        - price_per_unit_money
+        - price_per_unit_points
+        - target_units
+        - target_amount
+      properties:
+        zone_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Bunaken Reef Coral Restoration Phase 2
+        description:
+          type: string
+          example: Restoring 2000 coral fragments across shallow shelf reefs.
+        objectives:
+          type: string
+          example: Deploy 50 new spider frames and monitor survival rates.
+        category:
+          $ref: '#/components/schemas/ProjectCategory'
+        species_or_type_name:
+          type: string
+          example: Acropora cervicornis
+        image_url:
+          type: string
+          example: https://storage.bioverse.id/projects/bunaken2.jpg
+        unit_name:
+          type: string
+          example: fragment
+        currency_code:
+          type: string
+          default: USD
+          example: USD
+        price_per_unit_money:
+          type: number
+          example: 15.0
+        price_per_unit_points:
+          type: integer
+          example: 150
+        target_units:
+          type: integer
+          example: 1000
+        target_amount:
+          type: number
+          example: 15000.0
+        replant_reserve_pct:
+          type: number
+          example: 0.15
+        donation_start_date:
+          type: string
+          format: date
+          example: "2026-01-01"
+        donation_end_date:
+          type: string
+          format: date
+          example: "2026-12-31"
+        estimated_planting_date:
+          type: string
+          format: date
+          example: "2027-01-15"
+
+    UpdateConservationProjectRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        objectives:
+          type: string
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        physical_health_status:
+          $ref: '#/components/schemas/EnvironmentalHealthStatus'
+        price_per_unit_money:
+          type: number
+        price_per_unit_points:
+          type: integer
+
+    CreateSpiderFrameRequest:
+      type: object
+      required:
+        - frame_code
+        - zone_id
+      properties:
+        frame_code:
+          type: string
+          example: BNK-001
+        zone_id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        depth_meters:
+          type: number
+          example: 8.5
+        latitude:
+          type: number
+          example: 1.6145
+        longitude:
+          type: number
+          example: 124.7588
+        max_capacity:
+          type: integer
+          default: 15
+
+    CreateNewsRequest:
+      type: object
+      required:
+        - title
+        - summary
+      properties:
+        title:
+          type: string
+          example: Bunaken Marine Park Expands Coral Sanctuary
+        category:
+          $ref: '#/components/schemas/ProjectCategory'
+        summary:
+          type: string
+          example: Marine conservationists celebrate historic coral restoration milestones.
+        content:
+          type: string
+          example: Full article markdown content here...
+        thumbnail_url:
+          type: string
+          example: https://storage.bioverse.id/news/bunaken.jpg
+        is_featured:
+          type: boolean
+          default: false
+
+    CreateCatalogProductRequest:
+      type: object
+      required:
+        - sku_code
+        - name
+        - item_type
+        - price_points
+      properties:
+        sku_code:
+          type: string
+          example: PET_SKIN_TURTLE_GOLD
+        name:
+          type: string
+          example: Golden Sea Turtle Skin
+        description:
+          type: string
+          example: An exclusive golden finish for your sea turtle companion.
+        item_type:
+          type: string
+          enum: [streak_freeze, pet_skin, pet_accessory, habitat_background, xp_boost_item]
+        price_points:
+          type: integer
+          example: 500
+        is_iap_only:
+          type: boolean
+          default: false
+        preview_asset_url:
+          type: string
+          example: https://storage.bioverse.id/items/skin_gold.png
+
+    UpdateCatalogProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price_points:
+          type: integer
+        is_active:
+          type: boolean
+
+    CreateSubscriptionPlanRequest:
+      type: object
+      required:
+        - sku_code
+        - name
+      properties:
+        sku_code:
+          type: string
+          example: PLAN_PLUS_MONTHLY
+        group_code:
+          type: string
+          default: bioverse_plus
+        name:
+          type: string
+          example: BioVerse Plus Monthly
+        description:
+          type: string
+          example: Premium benefits with XP boost and companion cosmetics.
+        plan_type:
+          type: string
+          enum: [maintenance, premium_benefit, custom]
+          default: premium_benefit
+        billing_interval:
+          type: string
+          enum: [monthly, quarterly, annually]
+          default: monthly
+        interval_count:
+          type: integer
+          default: 1
+        duration_months:
+          type: integer
+
+    UpdateSubscriptionPlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        is_active:
+          type: boolean
+
+    CreateEcoMissionRequest:
+      type: object
+      required:
+        - title
+        - description
+        - category
+        - points_reward
+        - xp_reward
+      properties:
+        sponsor_company_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Coastal Mangrove Planting
+        description:
+          type: string
+          example: Plant a mangrove sapling in tidal wetland.
+        instructions:
+          type: string
+          example: Upload a clear photograph showing the sapling rooted in sediment.
+        category:
+          type: string
+          example: mangrove_planting
+        difficulty:
+          type: string
+          enum: [easy, medium, hard, expert]
+          default: medium
+        image_url:
+          type: string
+          example: https://storage.bioverse.id/missions/mangrove.jpg
+        points_reward:
+          type: integer
+          example: 100
+        xp_reward:
+          type: integer
+          example: 50
+        requires_camera_proof:
+          type: boolean
+          default: true
+        cv_target_label:
+          type: string
+          example: mangrove_sapling
+        cv_min_confidence:
+          type: number
+          example: 0.85
+        is_daily:
+          type: boolean
+          default: false
+
+    UpdateEcoMissionRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        instructions:
+          type: string
+        points_reward:
+          type: integer
+        xp_reward:
+          type: integer
+        is_active:
+          type: boolean

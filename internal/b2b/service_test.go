@@ -139,5 +139,30 @@ func TestB2BAndESGEndToEnd(t *testing.T) {
 		t.Fatalf("expected 1 audit report, got %d", len(reports))
 	}
 
-	t.Logf("B2B contract, quota exhaust invariant, and ESG reporting verified for %s", company.LegalName)
+	// 9. Verify corporate dashboard summary metrics
+	dash, err := b2bSvc.GetCorporateDashboard(ctx, company.ID)
+	if err != nil {
+		t.Fatalf("failed to get corporate dashboard: %v", err)
+	}
+	if dash.LegalName != company.LegalName {
+		t.Errorf("expected legal name %s, got %s", company.LegalName, dash.LegalName)
+	}
+	if dash.TotalSponsoredQuota != 1 || dash.UsedSponsoredQuota != 1 || dash.RemainingQuota != 0 {
+		t.Errorf("expected 1 total/used quota and 0 remaining, got %+v", dash)
+	}
+
+	// 10. Verify member lookup by user ID
+	memberUserID, _ := uuid.NewV7()
+	_, _ = pool.Exec(ctx, "INSERT INTO users (id, full_name, email) VALUES ($1, $2, $3)", memberUserID, "Rina Melati", fmt.Sprintf("rina_%d@samudera.test", uniqueSuffix))
+	_, _ = pool.Exec(ctx, "UPDATE company_members SET user_id = $1 WHERE id = $2", memberUserID, member.ID)
+
+	foundMember, err := b2bSvc.GetMemberByUserID(ctx, memberUserID)
+	if err != nil {
+		t.Fatalf("failed to lookup member by user ID: %v", err)
+	}
+	if foundMember.CompanyID != company.ID {
+		t.Errorf("expected company ID %s, got %s", company.ID, foundMember.CompanyID)
+	}
+
+	t.Logf("B2B contract, quota exhaust invariant, dashboard, and ESG reporting verified for %s", company.LegalName)
 }

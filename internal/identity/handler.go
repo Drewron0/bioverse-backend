@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/Drewron0/bioverse-backend/internal/platform/middleware"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // Handler serves HTTP endpoints for identity and authentication.
@@ -46,6 +48,13 @@ func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMidd
 		userRouter.Get("/me", h.handleGetMe)
 		userRouter.Patch("/me", h.handlePatchMe)
 		userRouter.Post("/fcm-token", h.handleFCMToken)
+	})
+
+	r.Route("/v1/app/notifications", func(notifRouter chi.Router) {
+		notifRouter.Use(userAuthMiddleware)
+		notifRouter.Get("/", h.handleListNotifications)
+		notifRouter.Patch("/{id}/read", h.handleMarkNotificationRead)
+		notifRouter.Post("/read-all", h.handleMarkAllNotificationsRead)
 	})
 
 	r.Route("/v1/admin/auth", func(adminAuth chi.Router) {
@@ -597,4 +606,73 @@ func (h *Handler) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Admin session revoked successfully.",
 	})
+}
+
+func (h *Handler) handleListNotifications(w http.ResponseWriter, r *http.Request) {
+	userID, ok := GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	limit := int32(20)
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = int32(l)
+		}
+	}
+
+	notifs, err := h.service.ListUserNotifications(r.Context(), userID, limit)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, notifs)
+}
+
+func (h *Handler) handleMarkNotificationRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	notifIDStr := chi.URLParam(r, "id")
+	notifID, err := uuid.Parse(notifIDStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid notification UUID", nil)
+		return
+	}
+
+	notif, err := h.service.MarkNotificationRead(r.Context(), userID, notifID)
+	if err != nil {
+		httperr.NotFound(w, r, "Notification not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, notif)
+}
+
+func (h *Handler) handleMarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	if err := h.service.MarkAllNotificationsRead(r.Context(), userID); err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "All notifications marked as read",
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
 }

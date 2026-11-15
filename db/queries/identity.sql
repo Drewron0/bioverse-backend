@@ -167,3 +167,27 @@ UPDATE platform_admins
 SET mfa_enabled = true,
     mfa_verified_at = NOW()
 WHERE id = $1;
+
+-- name: CreateNotification :one
+INSERT INTO notifications (
+    id, user_id, title, body, notification_type, reference_type, reference_id, is_read, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, false, NOW()
+) RETURNING *;
+
+-- name: ListNotificationsByUserID :many
+SELECT * FROM notifications
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- name: MarkNotificationAsRead :one
+UPDATE notifications
+SET is_read = true, read_at = NOW()
+WHERE id = $1 AND user_id = $2
+RETURNING *;
+
+-- name: MarkAllNotificationsAsRead :exec
+UPDATE notifications
+SET is_read = true, read_at = NOW()
+WHERE user_id = $1 AND is_read = false;

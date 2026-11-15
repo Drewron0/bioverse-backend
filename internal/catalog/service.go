@@ -756,3 +756,84 @@ func (s *Service) CancelSubscription(ctx context.Context, userID, subID uuid.UUI
 		CreatedAt:       createdAt.Time,
 	}, nil
 }
+
+// CreateProduct creates a digital product.
+func (s *Service) CreateProduct(ctx context.Context, sku, name, desc string, itemType store.DigitalItemType, points int64, isIAP bool, assetURL string) (*store.DigitalProducts, error) {
+	pID, _ := uuid.NewV7()
+	p, err := s.store.CreateDigitalProduct(ctx, store.CreateDigitalProductParams{
+		ID:              pID,
+		SkuCode:         sku,
+		Name:            name,
+		Description:     desc,
+		ItemType:        itemType,
+		PricePoints:     points,
+		IsIapOnly:       isIAP,
+		Attributes:      []byte("{}"),
+		PreviewAssetUrl: assetURL,
+		IsActive:        true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create digital product: %w", err)
+	}
+	return &p, nil
+}
+
+// UpdateProduct updates digital product details.
+func (s *Service) UpdateProduct(ctx context.Context, id uuid.UUID, name, desc string, points int64, isActive bool) (*store.DigitalProducts, error) {
+	p, err := s.store.UpdateDigitalProduct(ctx, store.UpdateDigitalProductParams{
+		ID:          id,
+		Name:        name,
+		Description: desc,
+		PricePoints: points,
+		IsActive:    isActive,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update digital product: %w", err)
+	}
+	return &p, nil
+}
+
+// CreatePlan creates a subscription plan.
+func (s *Service) CreatePlan(ctx context.Context, sku, group, name, desc string, planType store.SubscriptionPlanType, interval store.SubscriptionFrequency, intervalCount int32, durationMonths *int32, benefits []byte) (*store.SubscriptionPlans, error) {
+	pID, _ := uuid.NewV7()
+	if benefits == nil {
+		benefits = []byte("{}")
+	}
+	var dur pgtype.Int4
+	if durationMonths != nil {
+		dur = pgtype.Int4{Int32: *durationMonths, Valid: true}
+	}
+
+	p, err := s.store.CreateSubscriptionPlan(ctx, store.CreateSubscriptionPlanParams{
+		ID:              pID,
+		SkuCode:         sku,
+		GroupCode:       group,
+		Name:            name,
+		Description:     desc,
+		PlanType:        planType,
+		BillingInterval: interval,
+		IntervalCount:   intervalCount,
+		DurationMonths:  dur,
+		Benefits:        benefits,
+		IsActive:        true,
+		SortOrder:       0,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create subscription plan: %w", err)
+	}
+	return &p, nil
+}
+
+// UpdatePlan updates subscription plan details.
+func (s *Service) UpdatePlan(ctx context.Context, id uuid.UUID, name, desc string, isActive bool) (*store.SubscriptionPlans, error) {
+	p, err := s.store.UpdateSubscriptionPlan(ctx, store.UpdateSubscriptionPlanParams{
+		ID:          id,
+		Name:        name,
+		Description: desc,
+		IsActive:    isActive,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update subscription plan: %w", err)
+	}
+	return &p, nil
+}

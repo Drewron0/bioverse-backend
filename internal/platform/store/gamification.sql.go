@@ -35,6 +35,76 @@ func (q *Queries) CountActiveCoralFragmentsByUserID(ctx context.Context, adopted
 	return count, err
 }
 
+const createMission = `-- name: CreateMission :one
+INSERT INTO eco_missions (
+    id, sponsor_company_id, title, description, instructions, category, difficulty,
+    image_url, points_reward, xp_reward, requires_camera_proof, cv_target_label,
+    cv_min_confidence, is_daily, is_active
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12,
+    $13, $14, $15
+) RETURNING id, sponsor_company_id, title, description, instructions, category, difficulty, image_url, points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at
+`
+
+type CreateMissionParams struct {
+	ID                  uuid.UUID      `json:"id"`
+	SponsorCompanyID    pgtype.UUID    `json:"sponsor_company_id"`
+	Title               string         `json:"title"`
+	Description         string         `json:"description"`
+	Instructions        string         `json:"instructions"`
+	Category            pgtype.Text    `json:"category"`
+	Difficulty          pgtype.Text    `json:"difficulty"`
+	ImageUrl            pgtype.Text    `json:"image_url"`
+	PointsReward        int64          `json:"points_reward"`
+	XpReward            int64          `json:"xp_reward"`
+	RequiresCameraProof bool           `json:"requires_camera_proof"`
+	CvTargetLabel       pgtype.Text    `json:"cv_target_label"`
+	CvMinConfidence     pgtype.Numeric `json:"cv_min_confidence"`
+	IsDaily             bool           `json:"is_daily"`
+	IsActive            bool           `json:"is_active"`
+}
+
+func (q *Queries) CreateMission(ctx context.Context, arg CreateMissionParams) (EcoMissions, error) {
+	row := q.db.QueryRow(ctx, createMission,
+		arg.ID,
+		arg.SponsorCompanyID,
+		arg.Title,
+		arg.Description,
+		arg.Instructions,
+		arg.Category,
+		arg.Difficulty,
+		arg.ImageUrl,
+		arg.PointsReward,
+		arg.XpReward,
+		arg.RequiresCameraProof,
+		arg.CvTargetLabel,
+		arg.CvMinConfidence,
+		arg.IsDaily,
+		arg.IsActive,
+	)
+	var i EcoMissions
+	err := row.Scan(
+		&i.ID,
+		&i.SponsorCompanyID,
+		&i.Title,
+		&i.Description,
+		&i.Instructions,
+		&i.Category,
+		&i.Difficulty,
+		&i.ImageUrl,
+		&i.PointsReward,
+		&i.XpReward,
+		&i.RequiresCameraProof,
+		&i.CvTargetLabel,
+		&i.CvMinConfidence,
+		&i.IsDaily,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createMissionSubmission = `-- name: CreateMissionSubmission :one
 INSERT INTO user_mission_submissions (
     id, user_id, mission_id, pet_id, submission_date, proof_image_url, image_hash, status,
@@ -602,6 +672,48 @@ func (q *Queries) ListActivePetBoosts(ctx context.Context, petID uuid.UUID) ([]P
 	return items, nil
 }
 
+const listAllMissions = `-- name: ListAllMissions :many
+SELECT id, sponsor_company_id, title, description, instructions, category, difficulty, image_url, points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at FROM eco_missions
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAllMissions(ctx context.Context) ([]EcoMissions, error) {
+	rows, err := q.db.Query(ctx, listAllMissions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EcoMissions
+	for rows.Next() {
+		var i EcoMissions
+		if err := rows.Scan(
+			&i.ID,
+			&i.SponsorCompanyID,
+			&i.Title,
+			&i.Description,
+			&i.Instructions,
+			&i.Category,
+			&i.Difficulty,
+			&i.ImageUrl,
+			&i.PointsReward,
+			&i.XpReward,
+			&i.RequiresCameraProof,
+			&i.CvTargetLabel,
+			&i.CvMinConfidence,
+			&i.IsDaily,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingMissionSubmissions = `-- name: ListPendingMissionSubmissions :many
 SELECT s.id, s.user_id, s.mission_id, s.pet_id, s.submission_date, s.proof_image_url, s.image_hash, s.status, s.cv_job_id, s.cv_model_version, s.cv_confidence_score, s.cv_raw_response, s.awarded_points, s.awarded_xp, s.rejection_reason, s.submitted_at, s.verified_at, m.cv_target_label, m.cv_min_confidence
 FROM user_mission_submissions s
@@ -928,6 +1040,56 @@ func (q *Queries) UnlockUserPoints(ctx context.Context, arg UnlockUserPointsPara
 	row := q.db.QueryRow(ctx, unlockUserPoints, arg.ID, arg.LockedPointsBalance)
 	var i UnlockUserPointsRow
 	err := row.Scan(&i.ID, &i.PointsBalance, &i.LockedPointsBalance)
+	return i, err
+}
+
+const updateMission = `-- name: UpdateMission :one
+UPDATE eco_missions
+SET title = $2, description = $3, instructions = $4,
+    points_reward = $5, xp_reward = $6, is_active = $7
+WHERE id = $1
+RETURNING id, sponsor_company_id, title, description, instructions, category, difficulty, image_url, points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at
+`
+
+type UpdateMissionParams struct {
+	ID           uuid.UUID `json:"id"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	Instructions string    `json:"instructions"`
+	PointsReward int64     `json:"points_reward"`
+	XpReward     int64     `json:"xp_reward"`
+	IsActive     bool      `json:"is_active"`
+}
+
+func (q *Queries) UpdateMission(ctx context.Context, arg UpdateMissionParams) (EcoMissions, error) {
+	row := q.db.QueryRow(ctx, updateMission,
+		arg.ID,
+		arg.Title,
+		arg.Description,
+		arg.Instructions,
+		arg.PointsReward,
+		arg.XpReward,
+		arg.IsActive,
+	)
+	var i EcoMissions
+	err := row.Scan(
+		&i.ID,
+		&i.SponsorCompanyID,
+		&i.Title,
+		&i.Description,
+		&i.Instructions,
+		&i.Category,
+		&i.Difficulty,
+		&i.ImageUrl,
+		&i.PointsReward,
+		&i.XpReward,
+		&i.RequiresCameraProof,
+		&i.CvTargetLabel,
+		&i.CvMinConfidence,
+		&i.IsDaily,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 

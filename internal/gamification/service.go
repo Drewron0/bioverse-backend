@@ -692,3 +692,71 @@ func max(a, b int32) int32 {
 	}
 	return b
 }
+
+// CreateMissionInput defines parameters to create an eco-mission.
+type CreateMissionInput struct {
+	SponsorCompanyID   *uuid.UUID
+	Title              string
+	Description        string
+	Instructions       string
+	Category           string
+	Difficulty         string
+	ImageURL           string
+	PointsReward       int64
+	XPReward           int64
+	RequiresCamera     bool
+	CVTargetLabel      string
+	CVMinConfidence    decimal.Decimal
+	IsDaily            bool
+}
+
+// CreateMission creates a new eco-mission.
+func (s *Service) CreateMission(ctx context.Context, in CreateMissionInput) (*store.EcoMissions, error) {
+	mID, _ := uuid.NewV7()
+	var compUUID pgtype.UUID
+	if in.SponsorCompanyID != nil {
+		compUUID = pgtype.UUID{Bytes: *in.SponsorCompanyID, Valid: true}
+	}
+	if in.CVMinConfidence.IsZero() {
+		in.CVMinConfidence = decimal.NewFromFloat(0.80)
+	}
+
+	m, err := s.store.CreateMission(ctx, store.CreateMissionParams{
+		ID:                  mID,
+		SponsorCompanyID:    compUUID,
+		Title:               in.Title,
+		Description:         in.Description,
+		Instructions:        in.Instructions,
+		Category:            pgtype.Text{String: in.Category, Valid: in.Category != ""},
+		Difficulty:          pgtype.Text{String: in.Difficulty, Valid: in.Difficulty != ""},
+		ImageUrl:            pgtype.Text{String: in.ImageURL, Valid: in.ImageURL != ""},
+		PointsReward:        in.PointsReward,
+		XpReward:            in.XPReward,
+		RequiresCameraProof: in.RequiresCamera,
+		CvTargetLabel:       pgtype.Text{String: in.CVTargetLabel, Valid: in.CVTargetLabel != ""},
+		CvMinConfidence:     decimalutil.ToNumeric(in.CVMinConfidence),
+		IsDaily:             in.IsDaily,
+		IsActive:            true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create eco-mission: %w", err)
+	}
+	return &m, nil
+}
+
+// UpdateMission updates an existing eco-mission.
+func (s *Service) UpdateMission(ctx context.Context, id uuid.UUID, title, desc, inst string, points, xp int64, isActive bool) (*store.EcoMissions, error) {
+	m, err := s.store.UpdateMission(ctx, store.UpdateMissionParams{
+		ID:           id,
+		Title:        title,
+		Description:  desc,
+		Instructions: inst,
+		PointsReward: points,
+		XpReward:     xp,
+		IsActive:     isActive,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update eco-mission: %w", err)
+	}
+	return &m, nil
+}

@@ -178,3 +178,25 @@ UPDATE virtual_pets
 SET equipped_product_id = $3
 WHERE id = $1 AND user_id = $2
 RETURNING *;
+
+-- name: CreateMission :one
+INSERT INTO eco_missions (
+    id, sponsor_company_id, title, description, instructions, category, difficulty,
+    image_url, points_reward, xp_reward, requires_camera_proof, cv_target_label,
+    cv_min_confidence, is_daily, is_active
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12,
+    $13, $14, $15
+) RETURNING *;
+
+-- name: UpdateMission :one
+UPDATE eco_missions
+SET title = $2, description = $3, instructions = $4,
+    points_reward = $5, xp_reward = $6, is_active = $7
+WHERE id = $1
+RETURNING *;
+
+-- name: ListAllMissions :many
+SELECT * FROM eco_missions
+ORDER BY created_at DESC;

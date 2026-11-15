@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Drewron0/bioverse-backend/internal/identity"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,8 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{service: svc}
 }
 
-// RegisterRoutes registers B2B endpoints restricted to administrators.
-func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware func(http.Handler) http.Handler) {
+// RegisterRoutes registers B2B admin and client portal endpoints.
+func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware, userMiddleware func(http.Handler) http.Handler) {
 	r.Group(func(protected chi.Router) {
 		protected.Use(adminMiddleware)
 
@@ -37,6 +38,14 @@ func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware func(http.Handler
 		protected.Post("/v1/admin/b2b/companies/{id}/esg/metrics", h.handleRecordESGMetric)
 		protected.Post("/v1/admin/b2b/companies/{id}/esg/reports", h.handleGenerateESGReport)
 		protected.Get("/v1/admin/b2b/companies/{id}/esg/reports", h.handleListESGReports)
+	})
+
+	r.Group(func(portal chi.Router) {
+		portal.Use(userMiddleware)
+
+		// B2B Client Web Portal (accessible to authenticated corporate members)
+		portal.Get("/v1/b2b/dashboard", h.handleGetClientDashboard)
+		portal.Get("/v1/b2b/reports", h.handleListClientReports)
 	})
 }
 
@@ -303,6 +312,50 @@ func (h *Handler) handleListESGReports(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"reports": reports})
+}
+
+func (h *Handler) handleGetClientDashboard(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	member, err := h.service.GetMemberByUserID(r.Context(), userID)
+	if err != nil {
+		httperr.Forbidden(w, r, "User is not an active member of any registered corporate company")
+		return
+	}
+
+	dash, err := h.service.GetCorporateDashboard(r.Context(), member.CompanyID)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, dash)
+}
+
+func (h *Handler) handleListClientReports(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	member, err := h.service.GetMemberByUserID(r.Context(), userID)
+	if err != nil {
+		httperr.Forbidden(w, r, "User is not an active member of any registered corporate company")
+		return
+	}
+
+	reports, err := h.service.ListESGAuditReports(r.Context(), member.CompanyID)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, reports)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

@@ -28,7 +28,7 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // RegisterRoutes mounts all gamification endpoints on the router.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware func(http.Handler) http.Handler) {
 	submissionLimiter := middleware.RateLimit(30, time.Minute)
 
 	r.Group(func(protected chi.Router) {
@@ -49,6 +49,12 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		// Streaks & Leaderboard
 		protected.Get("/v1/app/streaks", h.getStreak)
 		protected.Get("/v1/app/leaderboard", h.getLeaderboard)
+	})
+
+	r.Group(func(adminRouter chi.Router) {
+		adminRouter.Use(adminMiddleware)
+		adminRouter.Post("/v1/admin/gamification/missions", h.handleAdminCreateMission)
+		adminRouter.Put("/v1/admin/gamification/missions/{id}", h.handleAdminUpdateMission)
 	})
 }
 
@@ -472,6 +478,88 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		"rankings":    rankings,
 		"next_cursor": nil,
 	})
+}
+
+type createMissionRequest struct {
+	SponsorCompanyID *uuid.UUID      `json:"sponsor_company_id,omitempty"`
+	Title            string          `json:"title"`
+	Description      string          `json:"description"`
+	Instructions     string          `json:"instructions"`
+	Category         string          `json:"category"`
+	Difficulty       string          `json:"difficulty"`
+	ImageURL         string          `json:"image_url"`
+	PointsReward     int64           `json:"points_reward"`
+	XPReward         int64           `json:"xp_reward"`
+	RequiresCamera   bool            `json:"requires_camera_proof"`
+	CVTargetLabel    string          `json:"cv_target_label"`
+	CVMinConfidence  decimal.Decimal `json:"cv_min_confidence"`
+	IsDaily          bool            `json:"is_daily"`
+}
+
+func (h *Handler) handleAdminCreateMission(w http.ResponseWriter, r *http.Request) {
+	var req createMissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.Title == "" || req.Description == "" {
+		httperr.BadRequest(w, r, "title and description are required", nil)
+		return
+	}
+
+	m, err := h.service.CreateMission(r.Context(), CreateMissionInput{
+		SponsorCompanyID: req.SponsorCompanyID,
+		Title:            req.Title,
+		Description:      req.Description,
+		Instructions:     req.Instructions,
+		Category:         req.Category,
+		Difficulty:       req.Difficulty,
+		ImageURL:         req.ImageURL,
+		PointsReward:     req.PointsReward,
+		XPReward:         req.XPReward,
+		RequiresCamera:   req.RequiresCamera,
+		CVTargetLabel:    req.CVTargetLabel,
+		CVMinConfidence:  req.CVMinConfidence,
+		IsDaily:          req.IsDaily,
+	})
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, m)
+}
+
+type updateMissionRequest struct {
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	Instructions string `json:"instructions"`
+	PointsReward int64  `json:"points_reward"`
+	XPReward     int64  `json:"xp_reward"`
+	IsActive     bool   `json:"is_active"`
+}
+
+func (h *Handler) handleAdminUpdateMission(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	mID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid mission UUID", nil)
+		return
+	}
+
+	var req updateMissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	m, err := h.service.UpdateMission(r.Context(), mID, req.Title, req.Description, req.Instructions, req.PointsReward, req.XPReward, req.IsActive)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, m)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

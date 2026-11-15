@@ -102,3 +102,84 @@ SELECT
     COALESCE((SELECT SUM(planted_units_count) FROM conservation_projects WHERE category = 'tree'), 0)::bigint AS total_trees_planted,
     COALESCE((SELECT COUNT(DISTINCT adopted_by_user_id) FROM coral_fragments WHERE adopted_by_user_id IS NOT NULL), 0)::bigint AS active_guardians_count,
     COALESCE((SELECT SUM(planted_units_count) * 2.5 FROM conservation_projects), 0)::numeric AS total_biomass_restored_kg;
+
+-- name: CreateConservationZone :one
+INSERT INTO conservation_zones (
+    id, name, region, province, ecosystem_type, allocation_type,
+    latitude, longitude, min_depth_meters, max_depth_meters
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING *;
+
+-- name: ListConservationZones :many
+SELECT * FROM conservation_zones
+ORDER BY name ASC;
+
+-- name: GetConservationZoneByID :one
+SELECT * FROM conservation_zones
+WHERE id = $1
+LIMIT 1;
+
+-- name: UpdateConservationZone :one
+UPDATE conservation_zones
+SET name = $2, region = $3, province = $4, ecosystem_type = $5,
+    allocation_type = $6, latitude = $7, longitude = $8,
+    min_depth_meters = $9, max_depth_meters = $10
+WHERE id = $1
+RETURNING *;
+
+-- name: CreateConservationProject :one
+INSERT INTO conservation_projects (
+    id, zone_id, title, description, objectives, category,
+    species_or_type_name, image_url, status, physical_health_status,
+    unit_name, currency_code, price_per_unit_money, price_per_unit_points,
+    target_amount, target_units, replant_reserve_pct,
+    donation_start_date, donation_end_date, estimated_planting_date
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+) RETURNING *;
+
+-- name: UpdateConservationProject :one
+UPDATE conservation_projects
+SET title = $2, description = $3, objectives = $4,
+    status = $5, physical_health_status = $6,
+    price_per_unit_money = $7, price_per_unit_points = $8
+WHERE id = $1
+RETURNING *;
+
+-- name: CreateSpiderFrame :one
+INSERT INTO spider_frames (
+    id, frame_code, zone_id, company_id, depth_meters, latitude, longitude,
+    max_capacity_fragments, physical_health_status, is_active
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING *;
+
+-- name: ListSpiderFramesByZoneID :many
+SELECT * FROM spider_frames
+WHERE zone_id = $1
+ORDER BY frame_code ASC;
+
+-- name: CreateNewsArticle :one
+INSERT INTO news_articles (
+    id, title, category, summary, content, thumbnail_url, is_featured, published_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING *;
+
+-- name: UpdateNewsArticle :one
+UPDATE news_articles
+SET title = $2, category = $3, summary = $4, content = $5,
+    thumbnail_url = $6, is_featured = $7
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteNewsArticle :exec
+DELETE FROM news_articles
+WHERE id = $1;
+
+-- name: GetNewsArticleByID :one
+SELECT * FROM news_articles
+WHERE id = $1
+LIMIT 1;

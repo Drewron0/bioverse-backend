@@ -23,8 +23,8 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{service: svc}
 }
 
-// RegisterRoutes registers public and protected catalog endpoints on the router.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+// RegisterRoutes registers public, protected, and admin catalog endpoints on the router.
+func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware func(http.Handler) http.Handler) {
 	// Public routes
 	r.Route("/v1/app/catalog", func(cr chi.Router) {
 		cr.Get("/products", h.handleListProducts)
@@ -45,6 +45,15 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		protected.Post("/v1/app/subscriptions/{id}/pause", h.handlePauseSubscription)
 		protected.Post("/v1/app/subscriptions/{id}/resume", h.handleResumeSubscription)
 		protected.Post("/v1/app/subscriptions/{id}/cancel", h.handleCancelSubscription)
+	})
+
+	// Admin routes
+	r.Group(func(adminRouter chi.Router) {
+		adminRouter.Use(adminMiddleware)
+		adminRouter.Post("/v1/admin/catalog/products", h.handleAdminCreateProduct)
+		adminRouter.Put("/v1/admin/catalog/products/{id}", h.handleAdminUpdateProduct)
+		adminRouter.Post("/v1/admin/catalog/plans", h.handleAdminCreatePlan)
+		adminRouter.Put("/v1/admin/catalog/plans/{id}", h.handleAdminUpdatePlan)
 	})
 }
 
@@ -403,6 +412,141 @@ func (h *Handler) handleCancelSubscription(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, sub)
+}
+
+type createProductRequest struct {
+	SKUCode         string                `json:"sku_code"`
+	Name            string                `json:"name"`
+	Description     string                `json:"description"`
+	ItemType        store.DigitalItemType `json:"item_type"`
+	PricePoints     int64                 `json:"price_points"`
+	IsIAPOnly       bool                  `json:"is_iap_only"`
+	PreviewAssetURL string                `json:"preview_asset_url"`
+}
+
+func (h *Handler) handleAdminCreateProduct(w http.ResponseWriter, r *http.Request) {
+	var req createProductRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.SKUCode == "" || req.Name == "" {
+		httperr.BadRequest(w, r, "sku_code and name are required", nil)
+		return
+	}
+	if req.ItemType == "" {
+		req.ItemType = store.DigitalItemTypePetAccessory
+	}
+
+	p, err := h.service.CreateProduct(r.Context(), req.SKUCode, req.Name, req.Description, req.ItemType, req.PricePoints, req.IsIAPOnly, req.PreviewAssetURL)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, p)
+}
+
+type updateProductRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	PricePoints int64  `json:"price_points"`
+	IsActive    bool   `json:"is_active"`
+}
+
+func (h *Handler) handleAdminUpdateProduct(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	pID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid product UUID", nil)
+		return
+	}
+
+	var req updateProductRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	p, err := h.service.UpdateProduct(r.Context(), pID, req.Name, req.Description, req.PricePoints, req.IsActive)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, p)
+}
+
+type createPlanRequest struct {
+	SKUCode         string                     `json:"sku_code"`
+	GroupCode       string                     `json:"group_code"`
+	Name            string                     `json:"name"`
+	Description     string                     `json:"description"`
+	PlanType        store.SubscriptionPlanType `json:"plan_type"`
+	BillingInterval store.SubscriptionFrequency `json:"billing_interval"`
+	IntervalCount   int32                      `json:"interval_count"`
+	DurationMonths  *int32                     `json:"duration_months,omitempty"`
+}
+
+func (h *Handler) handleAdminCreatePlan(w http.ResponseWriter, r *http.Request) {
+	var req createPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.SKUCode == "" || req.Name == "" {
+		httperr.BadRequest(w, r, "sku_code and name are required", nil)
+		return
+	}
+	if req.GroupCode == "" {
+		req.GroupCode = "bioverse_plus"
+	}
+	if req.PlanType == "" {
+		req.PlanType = store.SubscriptionPlanTypePremiumBenefit
+	}
+	if req.BillingInterval == "" {
+		req.BillingInterval = store.SubscriptionFrequencyMonthly
+	}
+	if req.IntervalCount <= 0 {
+		req.IntervalCount = 1
+	}
+
+	p, err := h.service.CreatePlan(r.Context(), req.SKUCode, req.GroupCode, req.Name, req.Description, req.PlanType, req.BillingInterval, req.IntervalCount, req.DurationMonths, nil)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, p)
+}
+
+type updatePlanRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsActive    bool   `json:"is_active"`
+}
+
+func (h *Handler) handleAdminUpdatePlan(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	pID, err := uuid.Parse(idStr)
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid plan UUID", nil)
+		return
+	}
+
+	var req updatePlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	p, err := h.service.UpdatePlan(r.Context(), pID, req.Name, req.Description, req.IsActive)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, p)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

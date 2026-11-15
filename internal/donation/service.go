@@ -151,9 +151,13 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	var projectZoneID uuid.UUID
 	var projectSpecies string
 
-	bioShieldPrice, err := s.getBioShieldPrice(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine bio-shield price: %w", err)
+	var bioShieldPrice decimal.Decimal
+	if donationType == store.DonationTypeBioShieldAddon || in.IncludeBioShield {
+		price, err := s.getBioShieldPrice(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine bio-shield price: %w", err)
+		}
+		bioShieldPrice = price
 	}
 
 	if donationType == store.DonationTypeBioShieldAddon {
@@ -240,12 +244,14 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		}
 	}
 
-	pointsRate, err := s.getPointsRate(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine points rate: %w", err)
-	}
+	var pointsRate decimal.Decimal
 	pointsDiscount := decimal.Zero
 	if in.PointsToUse > 0 {
+		rate, err := s.getPointsRate(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine points rate: %w", err)
+		}
+		pointsRate = rate
 		pointsDiscount = decimal.NewFromInt(in.PointsToUse).Mul(pointsRate)
 		if pointsDiscount.GreaterThan(grossValue) {
 			pointsDiscount = grossValue
@@ -257,9 +263,13 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		moneyAmountPaid = decimal.Zero
 	}
 
-	exchangeRate, err := s.getUSDToIDRExchangeRate(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine USD to IDR exchange rate: %w", err)
+	exchangeRate := decimal.NewFromInt(16000)
+	if moneyAmountPaid.IsPositive() {
+		rate, err := s.getUSDToIDRExchangeRate(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine USD to IDR exchange rate: %w", err)
+		}
+		exchangeRate = rate
 	}
 	settlementAmount := moneyAmountPaid.Mul(exchangeRate).Round(0)
 

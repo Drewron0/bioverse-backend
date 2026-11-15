@@ -12,6 +12,151 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createConservationProject = `-- name: CreateConservationProject :one
+INSERT INTO conservation_projects (
+    id, zone_id, title, description, objectives, category,
+    species_or_type_name, image_url, status, physical_health_status,
+    unit_name, currency_code, price_per_unit_money, price_per_unit_points,
+    target_amount, target_units, replant_reserve_pct,
+    donation_start_date, donation_end_date, estimated_planting_date
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+) RETURNING id, zone_id, title, description, objectives, category, species_or_type_name, image_url, status, physical_health_status, is_underfunded_adjusted, original_target_amount, original_target_units, adjusted_at, unit_name, currency_code, price_per_unit_money, price_per_unit_points, target_amount, target_units, funded_units_count, planted_units_count, surviving_units_count, replant_reserve_pct, donation_start_date, donation_end_date, estimated_planting_date, created_at
+`
+
+type CreateConservationProjectParams struct {
+	ID                    uuid.UUID                 `json:"id"`
+	ZoneID                uuid.UUID                 `json:"zone_id"`
+	Title                 string                    `json:"title"`
+	Description           string                    `json:"description"`
+	Objectives            string                    `json:"objectives"`
+	Category              ProjectCategory           `json:"category"`
+	SpeciesOrTypeName     string                    `json:"species_or_type_name"`
+	ImageUrl              string                    `json:"image_url"`
+	Status                ProjectStatus             `json:"status"`
+	PhysicalHealthStatus  EnvironmentalHealthStatus `json:"physical_health_status"`
+	UnitName              string                    `json:"unit_name"`
+	CurrencyCode          string                    `json:"currency_code"`
+	PricePerUnitMoney     pgtype.Numeric            `json:"price_per_unit_money"`
+	PricePerUnitPoints    int64                     `json:"price_per_unit_points"`
+	TargetAmount          pgtype.Numeric            `json:"target_amount"`
+	TargetUnits           int32                     `json:"target_units"`
+	ReplantReservePct     pgtype.Numeric            `json:"replant_reserve_pct"`
+	DonationStartDate     pgtype.Date               `json:"donation_start_date"`
+	DonationEndDate       pgtype.Date               `json:"donation_end_date"`
+	EstimatedPlantingDate pgtype.Date               `json:"estimated_planting_date"`
+}
+
+func (q *Queries) CreateConservationProject(ctx context.Context, arg CreateConservationProjectParams) (ConservationProjects, error) {
+	row := q.db.QueryRow(ctx, createConservationProject,
+		arg.ID,
+		arg.ZoneID,
+		arg.Title,
+		arg.Description,
+		arg.Objectives,
+		arg.Category,
+		arg.SpeciesOrTypeName,
+		arg.ImageUrl,
+		arg.Status,
+		arg.PhysicalHealthStatus,
+		arg.UnitName,
+		arg.CurrencyCode,
+		arg.PricePerUnitMoney,
+		arg.PricePerUnitPoints,
+		arg.TargetAmount,
+		arg.TargetUnits,
+		arg.ReplantReservePct,
+		arg.DonationStartDate,
+		arg.DonationEndDate,
+		arg.EstimatedPlantingDate,
+	)
+	var i ConservationProjects
+	err := row.Scan(
+		&i.ID,
+		&i.ZoneID,
+		&i.Title,
+		&i.Description,
+		&i.Objectives,
+		&i.Category,
+		&i.SpeciesOrTypeName,
+		&i.ImageUrl,
+		&i.Status,
+		&i.PhysicalHealthStatus,
+		&i.IsUnderfundedAdjusted,
+		&i.OriginalTargetAmount,
+		&i.OriginalTargetUnits,
+		&i.AdjustedAt,
+		&i.UnitName,
+		&i.CurrencyCode,
+		&i.PricePerUnitMoney,
+		&i.PricePerUnitPoints,
+		&i.TargetAmount,
+		&i.TargetUnits,
+		&i.FundedUnitsCount,
+		&i.PlantedUnitsCount,
+		&i.SurvivingUnitsCount,
+		&i.ReplantReservePct,
+		&i.DonationStartDate,
+		&i.DonationEndDate,
+		&i.EstimatedPlantingDate,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createConservationZone = `-- name: CreateConservationZone :one
+INSERT INTO conservation_zones (
+    id, name, region, province, ecosystem_type, allocation_type,
+    latitude, longitude, min_depth_meters, max_depth_meters
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING id, name, region, province, ecosystem_type, allocation_type, latitude, longitude, min_depth_meters, max_depth_meters, created_at
+`
+
+type CreateConservationZoneParams struct {
+	ID             uuid.UUID          `json:"id"`
+	Name           string             `json:"name"`
+	Region         string             `json:"region"`
+	Province       string             `json:"province"`
+	EcosystemType  EcosystemKind      `json:"ecosystem_type"`
+	AllocationType ZoneAllocationType `json:"allocation_type"`
+	Latitude       pgtype.Numeric     `json:"latitude"`
+	Longitude      pgtype.Numeric     `json:"longitude"`
+	MinDepthMeters pgtype.Numeric     `json:"min_depth_meters"`
+	MaxDepthMeters pgtype.Numeric     `json:"max_depth_meters"`
+}
+
+func (q *Queries) CreateConservationZone(ctx context.Context, arg CreateConservationZoneParams) (ConservationZones, error) {
+	row := q.db.QueryRow(ctx, createConservationZone,
+		arg.ID,
+		arg.Name,
+		arg.Region,
+		arg.Province,
+		arg.EcosystemType,
+		arg.AllocationType,
+		arg.Latitude,
+		arg.Longitude,
+		arg.MinDepthMeters,
+		arg.MaxDepthMeters,
+	)
+	var i ConservationZones
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Region,
+		&i.Province,
+		&i.EcosystemType,
+		&i.AllocationType,
+		&i.Latitude,
+		&i.Longitude,
+		&i.MinDepthMeters,
+		&i.MaxDepthMeters,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createCoralFragment = `-- name: CreateCoralFragment :one
 INSERT INTO coral_fragments (
     id, fragment_code, nickname, project_id, donation_id, spider_frame_id, 
@@ -71,6 +216,123 @@ func (q *Queries) CreateCoralFragment(ctx context.Context, arg CreateCoralFragme
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const createNewsArticle = `-- name: CreateNewsArticle :one
+INSERT INTO news_articles (
+    id, title, category, summary, content, thumbnail_url, is_featured, published_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING id, title, category, summary, content, thumbnail_url, is_featured, published_at, created_at
+`
+
+type CreateNewsArticleParams struct {
+	ID           uuid.UUID          `json:"id"`
+	Title        string             `json:"title"`
+	Category     ProjectCategory    `json:"category"`
+	Summary      string             `json:"summary"`
+	Content      string             `json:"content"`
+	ThumbnailUrl string             `json:"thumbnail_url"`
+	IsFeatured   bool               `json:"is_featured"`
+	PublishedAt  pgtype.Timestamptz `json:"published_at"`
+}
+
+func (q *Queries) CreateNewsArticle(ctx context.Context, arg CreateNewsArticleParams) (NewsArticles, error) {
+	row := q.db.QueryRow(ctx, createNewsArticle,
+		arg.ID,
+		arg.Title,
+		arg.Category,
+		arg.Summary,
+		arg.Content,
+		arg.ThumbnailUrl,
+		arg.IsFeatured,
+		arg.PublishedAt,
+	)
+	var i NewsArticles
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Category,
+		&i.Summary,
+		&i.Content,
+		&i.ThumbnailUrl,
+		&i.IsFeatured,
+		&i.PublishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createSpiderFrame = `-- name: CreateSpiderFrame :one
+INSERT INTO spider_frames (
+    id, frame_code, zone_id, company_id, depth_meters, latitude, longitude,
+    max_capacity_fragments, physical_health_status, is_active
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING id, frame_code, company_id, sponsorship_invoice_id, zone_id, depth_meters, latitude, longitude, max_capacity_fragments, fragments_planted, physical_health_status, plaque_inscription_text, plaque_material, plaque_dimensions, plaque_3d_preview_url, biofouling_status, last_cleaned_at, next_maintenance_at, deployed_at, is_active, created_at
+`
+
+type CreateSpiderFrameParams struct {
+	ID                   uuid.UUID                 `json:"id"`
+	FrameCode            string                    `json:"frame_code"`
+	ZoneID               uuid.UUID                 `json:"zone_id"`
+	CompanyID            pgtype.UUID               `json:"company_id"`
+	DepthMeters          pgtype.Numeric            `json:"depth_meters"`
+	Latitude             pgtype.Numeric            `json:"latitude"`
+	Longitude            pgtype.Numeric            `json:"longitude"`
+	MaxCapacityFragments int32                     `json:"max_capacity_fragments"`
+	PhysicalHealthStatus EnvironmentalHealthStatus `json:"physical_health_status"`
+	IsActive             bool                      `json:"is_active"`
+}
+
+func (q *Queries) CreateSpiderFrame(ctx context.Context, arg CreateSpiderFrameParams) (SpiderFrames, error) {
+	row := q.db.QueryRow(ctx, createSpiderFrame,
+		arg.ID,
+		arg.FrameCode,
+		arg.ZoneID,
+		arg.CompanyID,
+		arg.DepthMeters,
+		arg.Latitude,
+		arg.Longitude,
+		arg.MaxCapacityFragments,
+		arg.PhysicalHealthStatus,
+		arg.IsActive,
+	)
+	var i SpiderFrames
+	err := row.Scan(
+		&i.ID,
+		&i.FrameCode,
+		&i.CompanyID,
+		&i.SponsorshipInvoiceID,
+		&i.ZoneID,
+		&i.DepthMeters,
+		&i.Latitude,
+		&i.Longitude,
+		&i.MaxCapacityFragments,
+		&i.FragmentsPlanted,
+		&i.PhysicalHealthStatus,
+		&i.PlaqueInscriptionText,
+		&i.PlaqueMaterial,
+		&i.PlaqueDimensions,
+		&i.Plaque3dPreviewUrl,
+		&i.BiofoulingStatus,
+		&i.LastCleanedAt,
+		&i.NextMaintenanceAt,
+		&i.DeployedAt,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteNewsArticle = `-- name: DeleteNewsArticle :exec
+DELETE FROM news_articles
+WHERE id = $1
+`
+
+func (q *Queries) DeleteNewsArticle(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteNewsArticle, id)
+	return err
 }
 
 const getConservationProjectByID = `-- name: GetConservationProjectByID :one
@@ -157,6 +419,31 @@ func (q *Queries) GetConservationProjectByID(ctx context.Context, id uuid.UUID) 
 	return i, err
 }
 
+const getConservationZoneByID = `-- name: GetConservationZoneByID :one
+SELECT id, name, region, province, ecosystem_type, allocation_type, latitude, longitude, min_depth_meters, max_depth_meters, created_at FROM conservation_zones
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetConservationZoneByID(ctx context.Context, id uuid.UUID) (ConservationZones, error) {
+	row := q.db.QueryRow(ctx, getConservationZoneByID, id)
+	var i ConservationZones
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Region,
+		&i.Province,
+		&i.EcosystemType,
+		&i.AllocationType,
+		&i.Latitude,
+		&i.Longitude,
+		&i.MinDepthMeters,
+		&i.MaxDepthMeters,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getCoralFragmentByID = `-- name: GetCoralFragmentByID :one
 SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
        cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
@@ -209,6 +496,29 @@ func (q *Queries) GetCoralFragmentByID(ctx context.Context, id uuid.UUID) (GetCo
 		&i.ProjectTitle,
 		&i.ZoneName,
 		&i.SpiderFrameTag,
+	)
+	return i, err
+}
+
+const getNewsArticleByID = `-- name: GetNewsArticleByID :one
+SELECT id, title, category, summary, content, thumbnail_url, is_featured, published_at, created_at FROM news_articles
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetNewsArticleByID(ctx context.Context, id uuid.UUID) (NewsArticles, error) {
+	row := q.db.QueryRow(ctx, getNewsArticleByID, id)
+	var i NewsArticles
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Category,
+		&i.Summary,
+		&i.Content,
+		&i.ThumbnailUrl,
+		&i.IsFeatured,
+		&i.PublishedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -427,6 +737,43 @@ func (q *Queries) ListConservationProjects(ctx context.Context) ([]ListConservat
 	return items, nil
 }
 
+const listConservationZones = `-- name: ListConservationZones :many
+SELECT id, name, region, province, ecosystem_type, allocation_type, latitude, longitude, min_depth_meters, max_depth_meters, created_at FROM conservation_zones
+ORDER BY name ASC
+`
+
+func (q *Queries) ListConservationZones(ctx context.Context) ([]ConservationZones, error) {
+	rows, err := q.db.Query(ctx, listConservationZones)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ConservationZones
+	for rows.Next() {
+		var i ConservationZones
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Region,
+			&i.Province,
+			&i.EcosystemType,
+			&i.AllocationType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.MinDepthMeters,
+			&i.MaxDepthMeters,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCoralFragmentsByUserID = `-- name: ListCoralFragmentsByUserID :many
 SELECT cf.id, cf.fragment_code, cf.nickname, cf.project_id, cf.donation_id,
        cf.spider_frame_id, cf.species_name, cf.lifecycle_status, cf.health_status,
@@ -583,4 +930,212 @@ func (q *Queries) ListNewsArticles(ctx context.Context, limit int32) ([]NewsArti
 		return nil, err
 	}
 	return items, nil
+}
+
+const listSpiderFramesByZoneID = `-- name: ListSpiderFramesByZoneID :many
+SELECT id, frame_code, company_id, sponsorship_invoice_id, zone_id, depth_meters, latitude, longitude, max_capacity_fragments, fragments_planted, physical_health_status, plaque_inscription_text, plaque_material, plaque_dimensions, plaque_3d_preview_url, biofouling_status, last_cleaned_at, next_maintenance_at, deployed_at, is_active, created_at FROM spider_frames
+WHERE zone_id = $1
+ORDER BY frame_code ASC
+`
+
+func (q *Queries) ListSpiderFramesByZoneID(ctx context.Context, zoneID uuid.UUID) ([]SpiderFrames, error) {
+	rows, err := q.db.Query(ctx, listSpiderFramesByZoneID, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SpiderFrames
+	for rows.Next() {
+		var i SpiderFrames
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameCode,
+			&i.CompanyID,
+			&i.SponsorshipInvoiceID,
+			&i.ZoneID,
+			&i.DepthMeters,
+			&i.Latitude,
+			&i.Longitude,
+			&i.MaxCapacityFragments,
+			&i.FragmentsPlanted,
+			&i.PhysicalHealthStatus,
+			&i.PlaqueInscriptionText,
+			&i.PlaqueMaterial,
+			&i.PlaqueDimensions,
+			&i.Plaque3dPreviewUrl,
+			&i.BiofoulingStatus,
+			&i.LastCleanedAt,
+			&i.NextMaintenanceAt,
+			&i.DeployedAt,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateConservationProject = `-- name: UpdateConservationProject :one
+UPDATE conservation_projects
+SET title = $2, description = $3, objectives = $4,
+    status = $5, physical_health_status = $6,
+    price_per_unit_money = $7, price_per_unit_points = $8
+WHERE id = $1
+RETURNING id, zone_id, title, description, objectives, category, species_or_type_name, image_url, status, physical_health_status, is_underfunded_adjusted, original_target_amount, original_target_units, adjusted_at, unit_name, currency_code, price_per_unit_money, price_per_unit_points, target_amount, target_units, funded_units_count, planted_units_count, surviving_units_count, replant_reserve_pct, donation_start_date, donation_end_date, estimated_planting_date, created_at
+`
+
+type UpdateConservationProjectParams struct {
+	ID                   uuid.UUID                 `json:"id"`
+	Title                string                    `json:"title"`
+	Description          string                    `json:"description"`
+	Objectives           string                    `json:"objectives"`
+	Status               ProjectStatus             `json:"status"`
+	PhysicalHealthStatus EnvironmentalHealthStatus `json:"physical_health_status"`
+	PricePerUnitMoney    pgtype.Numeric            `json:"price_per_unit_money"`
+	PricePerUnitPoints   int64                     `json:"price_per_unit_points"`
+}
+
+func (q *Queries) UpdateConservationProject(ctx context.Context, arg UpdateConservationProjectParams) (ConservationProjects, error) {
+	row := q.db.QueryRow(ctx, updateConservationProject,
+		arg.ID,
+		arg.Title,
+		arg.Description,
+		arg.Objectives,
+		arg.Status,
+		arg.PhysicalHealthStatus,
+		arg.PricePerUnitMoney,
+		arg.PricePerUnitPoints,
+	)
+	var i ConservationProjects
+	err := row.Scan(
+		&i.ID,
+		&i.ZoneID,
+		&i.Title,
+		&i.Description,
+		&i.Objectives,
+		&i.Category,
+		&i.SpeciesOrTypeName,
+		&i.ImageUrl,
+		&i.Status,
+		&i.PhysicalHealthStatus,
+		&i.IsUnderfundedAdjusted,
+		&i.OriginalTargetAmount,
+		&i.OriginalTargetUnits,
+		&i.AdjustedAt,
+		&i.UnitName,
+		&i.CurrencyCode,
+		&i.PricePerUnitMoney,
+		&i.PricePerUnitPoints,
+		&i.TargetAmount,
+		&i.TargetUnits,
+		&i.FundedUnitsCount,
+		&i.PlantedUnitsCount,
+		&i.SurvivingUnitsCount,
+		&i.ReplantReservePct,
+		&i.DonationStartDate,
+		&i.DonationEndDate,
+		&i.EstimatedPlantingDate,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateConservationZone = `-- name: UpdateConservationZone :one
+UPDATE conservation_zones
+SET name = $2, region = $3, province = $4, ecosystem_type = $5,
+    allocation_type = $6, latitude = $7, longitude = $8,
+    min_depth_meters = $9, max_depth_meters = $10
+WHERE id = $1
+RETURNING id, name, region, province, ecosystem_type, allocation_type, latitude, longitude, min_depth_meters, max_depth_meters, created_at
+`
+
+type UpdateConservationZoneParams struct {
+	ID             uuid.UUID          `json:"id"`
+	Name           string             `json:"name"`
+	Region         string             `json:"region"`
+	Province       string             `json:"province"`
+	EcosystemType  EcosystemKind      `json:"ecosystem_type"`
+	AllocationType ZoneAllocationType `json:"allocation_type"`
+	Latitude       pgtype.Numeric     `json:"latitude"`
+	Longitude      pgtype.Numeric     `json:"longitude"`
+	MinDepthMeters pgtype.Numeric     `json:"min_depth_meters"`
+	MaxDepthMeters pgtype.Numeric     `json:"max_depth_meters"`
+}
+
+func (q *Queries) UpdateConservationZone(ctx context.Context, arg UpdateConservationZoneParams) (ConservationZones, error) {
+	row := q.db.QueryRow(ctx, updateConservationZone,
+		arg.ID,
+		arg.Name,
+		arg.Region,
+		arg.Province,
+		arg.EcosystemType,
+		arg.AllocationType,
+		arg.Latitude,
+		arg.Longitude,
+		arg.MinDepthMeters,
+		arg.MaxDepthMeters,
+	)
+	var i ConservationZones
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Region,
+		&i.Province,
+		&i.EcosystemType,
+		&i.AllocationType,
+		&i.Latitude,
+		&i.Longitude,
+		&i.MinDepthMeters,
+		&i.MaxDepthMeters,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateNewsArticle = `-- name: UpdateNewsArticle :one
+UPDATE news_articles
+SET title = $2, category = $3, summary = $4, content = $5,
+    thumbnail_url = $6, is_featured = $7
+WHERE id = $1
+RETURNING id, title, category, summary, content, thumbnail_url, is_featured, published_at, created_at
+`
+
+type UpdateNewsArticleParams struct {
+	ID           uuid.UUID       `json:"id"`
+	Title        string          `json:"title"`
+	Category     ProjectCategory `json:"category"`
+	Summary      string          `json:"summary"`
+	Content      string          `json:"content"`
+	ThumbnailUrl string          `json:"thumbnail_url"`
+	IsFeatured   bool            `json:"is_featured"`
+}
+
+func (q *Queries) UpdateNewsArticle(ctx context.Context, arg UpdateNewsArticleParams) (NewsArticles, error) {
+	row := q.db.QueryRow(ctx, updateNewsArticle,
+		arg.ID,
+		arg.Title,
+		arg.Category,
+		arg.Summary,
+		arg.Content,
+		arg.ThumbnailUrl,
+		arg.IsFeatured,
+	)
+	var i NewsArticles
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Category,
+		&i.Summary,
+		&i.Content,
+		&i.ThumbnailUrl,
+		&i.IsFeatured,
+		&i.PublishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }

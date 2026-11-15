@@ -109,3 +109,41 @@ INSERT INTO iap_transactions (
 SELECT * FROM iap_transactions
 WHERE store_provider = $1 AND store_transaction_id = $2
 LIMIT 1;
+
+-- name: CreateDigitalProduct :one
+INSERT INTO digital_products (
+    id, sku_code, name, description, item_type, price_points, is_iap_only, attributes, preview_asset_url, is_active
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING *;
+
+-- name: UpdateDigitalProduct :one
+UPDATE digital_products
+SET name = $2, description = $3, price_points = $4, is_active = $5
+WHERE id = $1
+RETURNING *;
+
+-- name: CreateSubscriptionPlan :one
+INSERT INTO subscription_plans (
+    id, sku_code, group_code, name, description, plan_type, billing_interval, interval_count, duration_months, benefits, is_active, sort_order
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+) RETURNING *;
+
+-- name: UpdateSubscriptionPlan :one
+UPDATE subscription_plans
+SET name = $2, description = $3, is_active = $4
+WHERE id = $1
+RETURNING *;
+
+-- name: ListDueSubscriptions :many
+SELECT * FROM donation_subscriptions
+WHERE status = 'active' AND next_billing_date <= $1
+LIMIT $2;
+
+-- name: AdvanceSubscriptionBillingCycle :one
+UPDATE donation_subscriptions
+SET completed_cycles = completed_cycles + 1,
+    next_billing_date = $2
+WHERE id = $1
+RETURNING *;

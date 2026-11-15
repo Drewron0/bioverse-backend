@@ -150,3 +150,95 @@ func TestExpiredDonationsCleanupWorker(t *testing.T) {
 
 	t.Logf("Worker expired checkout cleanup and point unlocking verified for donation %s", donationID)
 }
+
+func TestDueSubscriptionsBillingWorker(t *testing.T) {
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	pool, err := database.NewPool(ctx, cfg.Database)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := store.New(pool)
+	identitySvc := identity.NewService(pool, queries, cfg, nil, nil)
+	runner := worker.NewJobRunner(pool, queries, nil)
+
+	uniqueSuffix := time.Now().UnixNano()
+	userRes, err := identitySvc.Register(ctx, identity.RegisterInput{
+		FullName:              fmt.Sprintf("Worker Sub User %d", uniqueSuffix),
+		Email:                 fmt.Sprintf("workersub_%d@bioverse.test", uniqueSuffix),
+		Password:              "StrongP@ssw0rd!2026",
+		Timezone:              "Asia/Jakarta",
+		PreferredCurrencyCode: "USD",
+	})
+	if err != nil {
+		t.Fatalf("failed to register user: %v", err)
+	}
+	userID := userRes.User.ID
+
+	subID, _ := uuid.NewV7()
+	pastDate := pgtype.Date{
+		Time:  time.Now().UTC().AddDate(0, 0, -2),
+		Valid: true,
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelCleanup()
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM donation_subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM user_tokens WHERE user_id = $1", userID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM users WHERE id = $1", userID)
+	})
+
+	_, err = queries.CreateDonationSubscription(ctx, store.CreateDonationSubscriptionParams{
+		ID:              subID,
+		UserID:          userID,
+		PlanID:          pgtype.UUID{Valid: false},
+		ProjectID:       pgtype.UUID{Valid: false},
+		Frequency:       store.SubscriptionFrequencyMonthly,
+		DurationMonths:  pgtype.Int4{Int32: 12, Valid: true},
+		UnitQuantity:    1,
+		CurrencyCode:    "USD",
+		AmountPerCycle:  decimalutil.ToNumeric(decimal.NewFromInt(10)),
+		PaymentMethod:   store.PaymentMethodTypeEwallet,
+		PaymentProvider: "xendit",
+		Status:          store.SubscriptionStatusActive,
+		NextBillingDate: pastDate,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test subscription: %v", err)
+	}
+
+	processed, err := runner.ProcessDueSubscriptions(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to process due subscriptions: %v", err)
+	}
+	if processed < 1 {
+		t.Errorf("expected at least 1 due subscription processed, got %d", processed)
+	}
+
+	// Verify cycle incremented
+	var cycles int32
+	var nextDate pgtype.Date
+	err = pool.QueryRow(ctx, "SELECT completed_cycles, next_billing_date FROM donation_subscriptions WHERE id = $1", subID).Scan(&cycles, &nextDate)
+	if err != nil {
+		t.Fatalf("failed to query updated subscription: %v", err)
+	}
+	if cycles != 1 {
+		t.Errorf("expected completed_cycles 1, got %d", cycles)
+	}
+	if !nextDate.Time.After(time.Now().UTC()) {
+		t.Errorf("expected next billing date to be in future, got %v", nextDate.Time)
+	}
+
+	t.Logf("Worker due subscription billing verified for subscription %s (cycles: %d)", subID, cycles)
+}

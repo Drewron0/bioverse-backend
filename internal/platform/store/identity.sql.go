@@ -71,6 +71,50 @@ func (q *Queries) CreateAdminToken(ctx context.Context, arg CreateAdminTokenPara
 	return i, err
 }
 
+const createNotification = `-- name: CreateNotification :one
+INSERT INTO notifications (
+    id, user_id, title, body, notification_type, reference_type, reference_id, is_read, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, false, NOW()
+) RETURNING id, user_id, title, body, notification_type, reference_type, reference_id, is_read, read_at, created_at
+`
+
+type CreateNotificationParams struct {
+	ID               uuid.UUID   `json:"id"`
+	UserID           uuid.UUID   `json:"user_id"`
+	Title            string      `json:"title"`
+	Body             string      `json:"body"`
+	NotificationType string      `json:"notification_type"`
+	ReferenceType    pgtype.Text `json:"reference_type"`
+	ReferenceID      pgtype.UUID `json:"reference_id"`
+}
+
+func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notifications, error) {
+	row := q.db.QueryRow(ctx, createNotification,
+		arg.ID,
+		arg.UserID,
+		arg.Title,
+		arg.Body,
+		arg.NotificationType,
+		arg.ReferenceType,
+		arg.ReferenceID,
+	)
+	var i Notifications
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.Body,
+		&i.NotificationType,
+		&i.ReferenceType,
+		&i.ReferenceID,
+		&i.IsRead,
+		&i.ReadAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
     id, full_name, email, password_hash, timezone, preferred_currency_code, referral_code
@@ -433,6 +477,49 @@ func (q *Queries) GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHash
 	return i, err
 }
 
+const listNotificationsByUserID = `-- name: ListNotificationsByUserID :many
+SELECT id, user_id, title, body, notification_type, reference_type, reference_id, is_read, read_at, created_at FROM notifications
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListNotificationsByUserIDParams struct {
+	UserID uuid.UUID `json:"user_id"`
+	Limit  int32     `json:"limit"`
+}
+
+func (q *Queries) ListNotificationsByUserID(ctx context.Context, arg ListNotificationsByUserIDParams) ([]Notifications, error) {
+	rows, err := q.db.Query(ctx, listNotificationsByUserID, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notifications
+	for rows.Next() {
+		var i Notifications
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.Body,
+			&i.NotificationType,
+			&i.ReferenceType,
+			&i.ReferenceID,
+			&i.IsRead,
+			&i.ReadAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAdminTokenUsed = `-- name: MarkAdminTokenUsed :exec
 UPDATE admin_tokens
 SET used_at = NOW()
@@ -442,6 +529,47 @@ WHERE id = $1
 func (q *Queries) MarkAdminTokenUsed(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markAdminTokenUsed, id)
 	return err
+}
+
+const markAllNotificationsAsRead = `-- name: MarkAllNotificationsAsRead :exec
+UPDATE notifications
+SET is_read = true, read_at = NOW()
+WHERE user_id = $1 AND is_read = false
+`
+
+func (q *Queries) MarkAllNotificationsAsRead(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markAllNotificationsAsRead, userID)
+	return err
+}
+
+const markNotificationAsRead = `-- name: MarkNotificationAsRead :one
+UPDATE notifications
+SET is_read = true, read_at = NOW()
+WHERE id = $1 AND user_id = $2
+RETURNING id, user_id, title, body, notification_type, reference_type, reference_id, is_read, read_at, created_at
+`
+
+type MarkNotificationAsReadParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) MarkNotificationAsRead(ctx context.Context, arg MarkNotificationAsReadParams) (Notifications, error) {
+	row := q.db.QueryRow(ctx, markNotificationAsRead, arg.ID, arg.UserID)
+	var i Notifications
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.Body,
+		&i.NotificationType,
+		&i.ReferenceType,
+		&i.ReferenceID,
+		&i.IsRead,
+		&i.ReadAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const markUserTokenUsed = `-- name: MarkUserTokenUsed :exec

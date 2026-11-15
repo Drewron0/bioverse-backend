@@ -9,6 +9,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/config"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/google/uuid"
 )
 
 func TestIdentityEndToEndFlow(t *testing.T) {
@@ -114,5 +115,42 @@ func TestIdentityEndToEndFlow(t *testing.T) {
 	}
 	if profile.Email != testEmail {
 		t.Errorf("expected profile email %s, got %s", testEmail, profile.Email)
+	}
+
+	// 8. Test Notifications Flow
+	notifID, _ := uuid.NewV7()
+	_, err = queries.CreateNotification(ctx, store.CreateNotificationParams{
+		ID:               notifID,
+		UserID:           regResult.User.ID,
+		Title:            "Welcome Guardian",
+		Body:             "Thank you for joining BioVerse coral restoration initiative.",
+		NotificationType: "announcement",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test notification: %v", err)
+	}
+
+	notifs, err := service.ListUserNotifications(ctx, regResult.User.ID, 10)
+	if err != nil {
+		t.Fatalf("failed to list notifications: %v", err)
+	}
+	if len(notifs) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(notifs))
+	}
+	if notifs[0].IsRead {
+		t.Errorf("expected notification to be unread initially")
+	}
+
+	markedNotif, err := service.MarkNotificationRead(ctx, regResult.User.ID, notifID)
+	if err != nil {
+		t.Fatalf("failed to mark notification read: %v", err)
+	}
+	if !markedNotif.IsRead {
+		t.Errorf("expected notification to be marked as read")
+	}
+
+	err = service.MarkAllNotificationsRead(ctx, regResult.User.ID)
+	if err != nil {
+		t.Fatalf("failed to mark all notifications read: %v", err)
 	}
 }

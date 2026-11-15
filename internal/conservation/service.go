@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 var (
@@ -160,4 +163,221 @@ func (s *Service) ListNewsArticles(ctx context.Context, limit int32) ([]store.Ne
 		limit = 10
 	}
 	return s.store.ListNewsArticles(ctx, limit)
+}
+
+// CreateZone creates a new conservation zone.
+func (s *Service) CreateZone(ctx context.Context, name, region, province string, ecosystem store.EcosystemKind, allocation store.ZoneAllocationType, lat, lng decimal.Decimal, minDepth, maxDepth *decimal.Decimal) (*store.ConservationZones, error) {
+	zoneID, _ := uuid.NewV7()
+	var minD, maxD pgtype.Numeric
+	if minDepth != nil {
+		minD = decimalutil.ToNumeric(*minDepth)
+	}
+	if maxDepth != nil {
+		maxD = decimalutil.ToNumeric(*maxDepth)
+	}
+
+	z, err := s.store.CreateConservationZone(ctx, store.CreateConservationZoneParams{
+		ID:             zoneID,
+		Name:           name,
+		Region:         region,
+		Province:       province,
+		EcosystemType:  ecosystem,
+		AllocationType: allocation,
+		Latitude:       decimalutil.ToNumeric(lat),
+		Longitude:      decimalutil.ToNumeric(lng),
+		MinDepthMeters: minD,
+		MaxDepthMeters: maxD,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create conservation zone: %w", err)
+	}
+	return &z, nil
+}
+
+// ListZones returns all registered conservation zones.
+func (s *Service) ListZones(ctx context.Context) ([]store.ConservationZones, error) {
+	return s.store.ListConservationZones(ctx)
+}
+
+// UpdateZone updates an existing conservation zone.
+func (s *Service) UpdateZone(ctx context.Context, id uuid.UUID, name, region, province string, ecosystem store.EcosystemKind, allocation store.ZoneAllocationType, lat, lng decimal.Decimal, minDepth, maxDepth *decimal.Decimal) (*store.ConservationZones, error) {
+	var minD, maxD pgtype.Numeric
+	if minDepth != nil {
+		minD = decimalutil.ToNumeric(*minDepth)
+	}
+	if maxDepth != nil {
+		maxD = decimalutil.ToNumeric(*maxDepth)
+	}
+
+	z, err := s.store.UpdateConservationZone(ctx, store.UpdateConservationZoneParams{
+		ID:             id,
+		Name:           name,
+		Region:         region,
+		Province:       province,
+		EcosystemType:  ecosystem,
+		AllocationType: allocation,
+		Latitude:       decimalutil.ToNumeric(lat),
+		Longitude:      decimalutil.ToNumeric(lng),
+		MinDepthMeters: minD,
+		MaxDepthMeters: maxD,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update conservation zone: %w", err)
+	}
+	return &z, nil
+}
+
+// CreateProjectInput defines fields to create a project.
+type CreateProjectInput struct {
+	ZoneID                uuid.UUID
+	Title                 string
+	Description           string
+	Objectives            string
+	Category              store.ProjectCategory
+	SpeciesOrTypeName     string
+	ImageURL              string
+	UnitName              string
+	CurrencyCode          string
+	PricePerUnitMoney     decimal.Decimal
+	PricePerUnitPoints    int64
+	TargetUnits           int32
+	TargetAmount          decimal.Decimal
+	ReplantReservePct     decimal.Decimal
+	DonationStartDate     time.Time
+	DonationEndDate       time.Time
+	EstimatedPlantingDate time.Time
+}
+
+// CreateProject creates a new conservation project.
+func (s *Service) CreateProject(ctx context.Context, in CreateProjectInput) (*store.ConservationProjects, error) {
+	pID, _ := uuid.NewV7()
+	if in.UnitName == "" {
+		in.UnitName = "fragment"
+	}
+	if in.CurrencyCode == "" {
+		in.CurrencyCode = "USD"
+	}
+	if in.ReplantReservePct.IsZero() {
+		in.ReplantReservePct = decimal.NewFromInt(30)
+	}
+
+	p, err := s.store.CreateConservationProject(ctx, store.CreateConservationProjectParams{
+		ID:                    pID,
+		ZoneID:                in.ZoneID,
+		Title:                 in.Title,
+		Description:           in.Description,
+		Objectives:            in.Objectives,
+		Category:              in.Category,
+		SpeciesOrTypeName:     in.SpeciesOrTypeName,
+		ImageUrl:              in.ImageURL,
+		Status:                store.ProjectStatusOpenForDonation,
+		PhysicalHealthStatus:  store.EnvironmentalHealthStatusHealthy,
+		UnitName:              in.UnitName,
+		CurrencyCode:          in.CurrencyCode,
+		PricePerUnitMoney:     decimalutil.ToNumeric(in.PricePerUnitMoney),
+		PricePerUnitPoints:    in.PricePerUnitPoints,
+		TargetAmount:          decimalutil.ToNumeric(in.TargetAmount),
+		TargetUnits:           in.TargetUnits,
+		ReplantReservePct:     decimalutil.ToNumeric(in.ReplantReservePct),
+		DonationStartDate:     pgtype.Date{Time: in.DonationStartDate, Valid: true},
+		DonationEndDate:       pgtype.Date{Time: in.DonationEndDate, Valid: true},
+		EstimatedPlantingDate: pgtype.Date{Time: in.EstimatedPlantingDate, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create conservation project: %w", err)
+	}
+	return &p, nil
+}
+
+// UpdateProject updates mutable fields of a project.
+func (s *Service) UpdateProject(ctx context.Context, id uuid.UUID, title, description, objectives string, status store.ProjectStatus, health store.EnvironmentalHealthStatus, priceMoney decimal.Decimal, pricePoints int64) (*store.ConservationProjects, error) {
+	p, err := s.store.UpdateConservationProject(ctx, store.UpdateConservationProjectParams{
+		ID:                   id,
+		Title:                title,
+		Description:          description,
+		Objectives:           objectives,
+		Status:               status,
+		PhysicalHealthStatus: health,
+		PricePerUnitMoney:    decimalutil.ToNumeric(priceMoney),
+		PricePerUnitPoints:   pricePoints,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update conservation project: %w", err)
+	}
+	return &p, nil
+}
+
+// CreateSpiderFrame creates a new spider frame for coral propagation.
+func (s *Service) CreateSpiderFrame(ctx context.Context, frameCode string, zoneID uuid.UUID, companyID *uuid.UUID, depth, lat, lng decimal.Decimal, maxCap int32) (*store.SpiderFrames, error) {
+	fID, _ := uuid.NewV7()
+	var compUUID pgtype.UUID
+	if companyID != nil {
+		compUUID = pgtype.UUID{Bytes: *companyID, Valid: true}
+	}
+	if maxCap <= 0 {
+		maxCap = 15
+	}
+
+	sf, err := s.store.CreateSpiderFrame(ctx, store.CreateSpiderFrameParams{
+		ID:                   fID,
+		FrameCode:            frameCode,
+		ZoneID:               zoneID,
+		CompanyID:            compUUID,
+		DepthMeters:          decimalutil.ToNumeric(depth),
+		Latitude:             decimalutil.ToNumeric(lat),
+		Longitude:            decimalutil.ToNumeric(lng),
+		MaxCapacityFragments: maxCap,
+		PhysicalHealthStatus: store.EnvironmentalHealthStatusHealthy,
+		IsActive:             true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create spider frame: %w", err)
+	}
+	return &sf, nil
+}
+
+// ListSpiderFrames returns spider frames in a given zone.
+func (s *Service) ListSpiderFrames(ctx context.Context, zoneID uuid.UUID) ([]store.SpiderFrames, error) {
+	return s.store.ListSpiderFramesByZoneID(ctx, zoneID)
+}
+
+// CreateNews creates a new article.
+func (s *Service) CreateNews(ctx context.Context, title string, cat store.ProjectCategory, summary, content, thumb string, isFeatured bool) (*store.NewsArticles, error) {
+	nID, _ := uuid.NewV7()
+	n, err := s.store.CreateNewsArticle(ctx, store.CreateNewsArticleParams{
+		ID:           nID,
+		Title:        title,
+		Category:     cat,
+		Summary:      summary,
+		Content:      content,
+		ThumbnailUrl: thumb,
+		IsFeatured:   isFeatured,
+		PublishedAt:  pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create news article: %w", err)
+	}
+	return &n, nil
+}
+
+// UpdateNews updates an existing news article.
+func (s *Service) UpdateNews(ctx context.Context, id uuid.UUID, title string, cat store.ProjectCategory, summary, content, thumb string, isFeatured bool) (*store.NewsArticles, error) {
+	n, err := s.store.UpdateNewsArticle(ctx, store.UpdateNewsArticleParams{
+		ID:           id,
+		Title:        title,
+		Category:     cat,
+		Summary:      summary,
+		Content:      content,
+		ThumbnailUrl: thumb,
+		IsFeatured:   isFeatured,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update news article: %w", err)
+	}
+	return &n, nil
+}
+
+// DeleteNews removes a news article.
+func (s *Service) DeleteNews(ctx context.Context, id uuid.UUID) error {
+	return s.store.DeleteNewsArticle(ctx, id)
 }

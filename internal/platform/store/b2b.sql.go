@@ -400,6 +400,66 @@ func (q *Queries) GetCompanyByID(ctx context.Context, id uuid.UUID) (Companies, 
 	return i, err
 }
 
+const getCompanyDashboardSummary = `-- name: GetCompanyDashboardSummary :one
+SELECT 
+    c.id AS company_id,
+    c.legal_name,
+    c.annual_fragment_target,
+    COALESCE(SUM(saq.total_quota), 0)::int AS total_sponsored_quota,
+    COALESCE(SUM(saq.used_quota), 0)::int AS used_sponsored_quota
+FROM companies c
+LEFT JOIN sponsored_adoption_quotas saq ON c.id = saq.company_id
+WHERE c.id = $1
+GROUP BY c.id, c.legal_name, c.annual_fragment_target
+`
+
+type GetCompanyDashboardSummaryRow struct {
+	CompanyID            uuid.UUID `json:"company_id"`
+	LegalName            string    `json:"legal_name"`
+	AnnualFragmentTarget int32     `json:"annual_fragment_target"`
+	TotalSponsoredQuota  int32     `json:"total_sponsored_quota"`
+	UsedSponsoredQuota   int32     `json:"used_sponsored_quota"`
+}
+
+func (q *Queries) GetCompanyDashboardSummary(ctx context.Context, id uuid.UUID) (GetCompanyDashboardSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getCompanyDashboardSummary, id)
+	var i GetCompanyDashboardSummaryRow
+	err := row.Scan(
+		&i.CompanyID,
+		&i.LegalName,
+		&i.AnnualFragmentTarget,
+		&i.TotalSponsoredQuota,
+		&i.UsedSponsoredQuota,
+	)
+	return i, err
+}
+
+const getCompanyMemberByUserID = `-- name: GetCompanyMemberByUserID :one
+SELECT id, company_id, user_id, invited_email, full_name, role, permission, invite_token_hash, invite_expires_at, is_accepted, invited_at, joined_at FROM company_members
+WHERE user_id = $1 AND is_accepted = true
+LIMIT 1
+`
+
+func (q *Queries) GetCompanyMemberByUserID(ctx context.Context, userID pgtype.UUID) (CompanyMembers, error) {
+	row := q.db.QueryRow(ctx, getCompanyMemberByUserID, userID)
+	var i CompanyMembers
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.UserID,
+		&i.InvitedEmail,
+		&i.FullName,
+		&i.Role,
+		&i.Permission,
+		&i.InviteTokenHash,
+		&i.InviteExpiresAt,
+		&i.IsAccepted,
+		&i.InvitedAt,
+		&i.JoinedAt,
+	)
+	return i, err
+}
+
 const getSponsoredAdoptionQuota = `-- name: GetSponsoredAdoptionQuota :one
 SELECT id, company_id, contract_id, project_id, mission_id, total_quota, used_quota, is_active, expires_at, created_at FROM sponsored_adoption_quotas
 WHERE id = $1

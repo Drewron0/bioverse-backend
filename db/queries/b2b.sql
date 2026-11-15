@@ -98,3 +98,20 @@ INSERT INTO esg_audit_reports (
 SELECT * FROM esg_audit_reports
 WHERE company_id = $1
 ORDER BY fiscal_year DESC, fiscal_quarter DESC;
+
+-- name: GetCompanyMemberByUserID :one
+SELECT * FROM company_members
+WHERE user_id = $1 AND is_accepted = true
+LIMIT 1;
+
+-- name: GetCompanyDashboardSummary :one
+SELECT 
+    c.id AS company_id,
+    c.legal_name,
+    c.annual_fragment_target,
+    COALESCE(SUM(saq.total_quota), 0)::int AS total_sponsored_quota,
+    COALESCE(SUM(saq.used_quota), 0)::int AS used_sponsored_quota
+FROM companies c
+LEFT JOIN sponsored_adoption_quotas saq ON c.id = saq.company_id
+WHERE c.id = $1
+GROUP BY c.id, c.legal_name, c.annual_fragment_target;

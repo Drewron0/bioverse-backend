@@ -939,3 +939,92 @@ func (s *Service) AdminVerifyMFA(ctx context.Context, adminID uuid.UUID, code st
 
 	return s.store.ConfirmAdminMFA(ctx, adminID)
 }
+
+// NotificationDTO formats user notifications for mobile and web clients.
+type NotificationDTO struct {
+	ID               string  `json:"id"`
+	Title            string  `json:"title"`
+	Body             string  `json:"body"`
+	NotificationType string  `json:"notification_type"`
+	ReferenceType    *string `json:"reference_type,omitempty"`
+	ReferenceID      *string `json:"reference_id,omitempty"`
+	IsRead           bool    `json:"is_read"`
+	ReadAt           *string `json:"read_at,omitempty"`
+	CreatedAt        string  `json:"created_at"`
+}
+
+// ListUserNotifications returns latest notifications for the user.
+func (s *Service) ListUserNotifications(ctx context.Context, userID uuid.UUID, limit int32) ([]NotificationDTO, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.store.ListNotificationsByUserID(ctx, store.ListNotificationsByUserIDParams{
+		UserID: userID,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list user notifications: %w", err)
+	}
+
+	result := make([]NotificationDTO, 0, len(rows))
+	for _, r := range rows {
+		item := NotificationDTO{
+			ID:               r.ID.String(),
+			Title:            r.Title,
+			Body:             r.Body,
+			NotificationType: r.NotificationType,
+			IsRead:           r.IsRead,
+			CreatedAt:        r.CreatedAt.Time.Format(time.RFC3339),
+		}
+		if r.ReferenceType.Valid {
+			item.ReferenceType = &r.ReferenceType.String
+		}
+		if r.ReferenceID.Valid {
+			refIDStr := uuid.UUID(r.ReferenceID.Bytes).String()
+			item.ReferenceID = &refIDStr
+		}
+		if r.ReadAt.Valid {
+			tStr := r.ReadAt.Time.Format(time.RFC3339)
+			item.ReadAt = &tStr
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+// MarkNotificationRead marks a specific user notification as read.
+func (s *Service) MarkNotificationRead(ctx context.Context, userID, notificationID uuid.UUID) (*NotificationDTO, error) {
+	r, err := s.store.MarkNotificationAsRead(ctx, store.MarkNotificationAsReadParams{
+		ID:     notificationID,
+		UserID: userID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to mark notification as read: %w", err)
+	}
+
+	item := &NotificationDTO{
+		ID:               r.ID.String(),
+		Title:            r.Title,
+		Body:             r.Body,
+		NotificationType: r.NotificationType,
+		IsRead:           r.IsRead,
+		CreatedAt:        r.CreatedAt.Time.Format(time.RFC3339),
+	}
+	if r.ReferenceType.Valid {
+		item.ReferenceType = &r.ReferenceType.String
+	}
+	if r.ReferenceID.Valid {
+		refIDStr := uuid.UUID(r.ReferenceID.Bytes).String()
+		item.ReferenceID = &refIDStr
+	}
+	if r.ReadAt.Valid {
+		tStr := r.ReadAt.Time.Format(time.RFC3339)
+		item.ReadAt = &tStr
+	}
+	return item, nil
+}
+
+// MarkAllNotificationsRead marks all unread notifications of the user as read.
+func (s *Service) MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) error {
+	return s.store.MarkAllNotificationsAsRead(ctx, userID)
+}
