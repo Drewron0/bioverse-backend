@@ -95,6 +95,12 @@ func (j *JobRunner) ProcessExpiredDonations(ctx context.Context, batchSize int32
 }
 
 // ProcessDueSubscriptions scans for recurring subscriptions that are due for billing and advances their cycle.
+//
+// NOTE: Demo / staging simulation only, bukan penagihan finansial nyata.
+// Pada fase staging ini, fungsi worker menaikkan completed_cycles dan menggeser next_billing_date
+// untuk memfasilitasi lifecycle testing frontend. Di environment production, pembuatan langganan
+// mengembalikan HTTP 503 (NOT_AVAILABLE) sampai gateway penagihan tokenized recurring Xendit
+// diintegrasikan secara penuh pada Fase 7.
 func (j *JobRunner) ProcessDueSubscriptions(ctx context.Context, batchSize int32) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 50
@@ -148,7 +154,7 @@ func (j *JobRunner) ProcessDueSubscriptions(ctx context.Context, batchSize int32
 	}
 
 	if processedCount > 0 {
-		j.logger.Info("subscription billing check cycle completed", slog.Int("processed_count", processedCount))
+		j.logger.Info("subscription billing check cycle completed (demo only, cycle advanced without live monetary charge)", slog.Int("processed_count", processedCount))
 	}
 	return processedCount, nil
 }

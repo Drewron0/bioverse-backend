@@ -231,6 +231,18 @@ func (s *Service) GenerateESGAuditReport(ctx context.Context, companyID uuid.UUI
 		memID = pgtype.UUID{Bytes: *memberID, Valid: true}
 	}
 
+	sum, _ := s.store.GetCompanyDashboardSummary(ctx, companyID)
+	readiness := decimal.Zero
+	if sum.AnnualFragmentTarget > 0 {
+		readiness = decimal.NewFromInt(int64(sum.UsedSponsoredQuota)).
+			Div(decimal.NewFromInt(int64(sum.AnnualFragmentTarget))).
+			Mul(decimal.NewFromInt(100)).
+			Round(2)
+		if readiness.GreaterThan(decimal.NewFromInt(100)) {
+			readiness = decimal.NewFromInt(100)
+		}
+	}
+
 	rep, err := s.store.CreateESGAuditReport(ctx, store.CreateESGAuditReportParams{
 		ID:                   repID,
 		CompanyID:            companyID,
@@ -239,7 +251,7 @@ func (s *Service) GenerateESGAuditReport(ctx context.Context, companyID uuid.UUI
 		FiscalYear:           year,
 		FiscalQuarter:        quarter,
 		ReportingPeriodLabel: fmt.Sprintf("Q%d %d", quarter, year),
-		Pojk51ReadinessPct:   decimalutil.ToNumeric(decimal.NewFromInt(100)),
+		Pojk51ReadinessPct:   decimalutil.ToNumeric(readiness),
 		GriCriteriaMet:       12,
 		AssuranceGrade:       "Grade_A",
 		ChapterPdfUrl:        pgtype.Text{String: pdfURL, Valid: pdfURL != ""},
@@ -292,6 +304,17 @@ func (s *Service) GetCorporateDashboard(ctx context.Context, companyID uuid.UUID
 		remaining = 0
 	}
 
+	readiness := decimal.Zero
+	if sum.AnnualFragmentTarget > 0 {
+		readiness = decimal.NewFromInt(int64(sum.UsedSponsoredQuota)).
+			Div(decimal.NewFromInt(int64(sum.AnnualFragmentTarget))).
+			Mul(decimal.NewFromInt(100)).
+			Round(2)
+		if readiness.GreaterThan(decimal.NewFromInt(100)) {
+			readiness = decimal.NewFromInt(100)
+		}
+	}
+
 	return &CorporateDashboardDTO{
 		CompanyID:            sum.CompanyID.String(),
 		LegalName:            sum.LegalName,
@@ -299,6 +322,6 @@ func (s *Service) GetCorporateDashboard(ctx context.Context, companyID uuid.UUID
 		TotalSponsoredQuota:  sum.TotalSponsoredQuota,
 		UsedSponsoredQuota:   sum.UsedSponsoredQuota,
 		RemainingQuota:       remaining,
-		Pojk51ReadinessPct:   "100.00",
+		Pojk51ReadinessPct:   readiness.StringFixed(2),
 	}, nil
 }

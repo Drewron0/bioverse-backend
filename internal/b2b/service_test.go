@@ -150,6 +150,9 @@ func TestB2BAndESGEndToEnd(t *testing.T) {
 	if dash.TotalSponsoredQuota != 1 || dash.UsedSponsoredQuota != 1 || dash.RemainingQuota != 0 {
 		t.Errorf("expected 1 total/used quota and 0 remaining, got %+v", dash)
 	}
+	if dash.Pojk51ReadinessPct != "0.10" {
+		t.Errorf("expected pojk51 readiness 0.10, got %s", dash.Pojk51ReadinessPct)
+	}
 
 	// 10. Verify member lookup by user ID
 	memberUserID, _ := uuid.NewV7()
