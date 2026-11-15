@@ -183,7 +183,7 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		conservationHandler := conservation.NewHandler(conservationService)
 		conservationHandler.RegisterRoutes(r, userAuthMiddleware)
 
-		catalogService := catalog.NewService(db, queries)
+		catalogService := catalog.NewService(db, queries, cfg.App.Environment == "production")
 		catalogHandler := catalog.NewHandler(catalogService)
 		catalogHandler.RegisterRoutes(r, userAuthMiddleware)
 
@@ -194,7 +194,8 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		donationHandler := donation.NewHandler(donationService, cfg.Payment.XenditWebhookToken, isDev)
 		donationHandler.RegisterRoutes(r, userAuthMiddleware)
 
-		gamificationService := gamification.NewService(db, queries, nil)
+		cvVerifier := gamification.NewHTTPCVVerifier(cfg.CV.ServiceURL)
+		gamificationService := gamification.NewService(db, queries, cvVerifier)
 		gamificationHandler := gamification.NewHandler(gamificationService)
 		gamificationHandler.RegisterRoutes(r, userAuthMiddleware)
 

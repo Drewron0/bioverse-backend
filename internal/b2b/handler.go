@@ -145,7 +145,10 @@ func (h *Handler) handleListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"members": members})
+	if members == nil {
+		members = []store.CompanyMembers{}
+	}
+	writeJSON(w, http.StatusOK, members)
 }
 
 type createContractRequest struct {

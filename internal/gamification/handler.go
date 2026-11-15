@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -60,7 +62,12 @@ func (h *Handler) listPets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"pets": pets})
+	if pets == nil {
+		pets = []store.ListVirtualPetsByUserIDRow{}
+	}
+
+	// Returns array directly to comply with OpenAPI type: array schema for client generation
+	writeJSON(w, http.StatusOK, pets)
 }
 
 type adoptPetRequest struct {
@@ -209,16 +216,45 @@ func (h *Handler) listMissions(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
-	_ = limit
+
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
 
 	missions, err := h.service.ListActiveMissions(r.Context())
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return
 	}
+
+	// Filter by cursor if provided
+	if cursor != "" {
+		foundIdx := -1
+		for i, m := range missions {
+			if m.ID.String() == cursor {
+				foundIdx = i
+				break
+			}
+		}
+		if foundIdx >= 0 && foundIdx+1 < len(missions) {
+			missions = missions[foundIdx+1:]
+		} else if foundIdx >= 0 {
+			missions = []store.EcoMissions{}
+		}
+	}
+
+	var nextCursor *string
+	if len(missions) > limit {
+		cursorVal := missions[limit-1].ID.String()
+		nextCursor = &cursorVal
+		missions = missions[:limit]
+	}
+
+	if missions == nil {
+		missions = []store.EcoMissions{}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":       missions,
-		"next_cursor": nil,
+		"next_cursor": nextCursor,
 	})
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
@@ -59,7 +60,8 @@ func (h *Handler) handleListProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"products": products})
+	// Returns array directly to comply with OpenAPI type: array schema for client generation
+	writeJSON(w, http.StatusOK, products)
 }
 
 func (h *Handler) handleListPlans(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +76,8 @@ func (h *Handler) handleListPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"plans": plans})
+	// Returns array directly to comply with OpenAPI type: array schema for client generation
+	writeJSON(w, http.StatusOK, plans)
 }
 
 type buyProductRequest struct {
@@ -89,6 +92,16 @@ func (h *Handler) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		httperr.BadRequest(w, r, "Idempotency-Key header is required", nil)
+		return
+	}
+	if _, err := uuid.Parse(idempotencyKey); err != nil {
+		httperr.BadRequest(w, r, "Idempotency-Key must be a valid UUID", nil)
+		return
+	}
+
 	var req buyProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httperr.BadRequest(w, r, "Invalid request body", nil)
@@ -99,7 +112,7 @@ func (h *Handler) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inv, err := h.service.BuyProductWithPoints(r.Context(), userID, req.ProductID, req.Quantity)
+	result, err := h.service.BuyProductWithPoints(r.Context(), userID, req.ProductID, req.Quantity, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, ErrProductNotFound) {
 			httperr.NotFound(w, r, "Digital product not found")
@@ -113,7 +126,7 @@ func (h *Handler) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, inv)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) handleListInventory(w http.ResponseWriter, r *http.Request) {
@@ -156,8 +169,10 @@ func (h *Handler) handleUseStreakFreeze(w http.ResponseWriter, r *http.Request) 
 }
 
 type createSubscriptionRequest struct {
-	PlanID        uuid.UUID               `json:"plan_id"`
-	PaymentMethod store.PaymentMethodType `json:"payment_method"`
+	PlanID            uuid.UUID               `json:"plan_id"`
+	ProjectID         uuid.UUID               `json:"project_id"`
+	UnitQuantity      int32                   `json:"unit_quantity"`
+	PaymentMethodType store.PaymentMethodType `json:"payment_method_type"`
 }
 
 func (h *Handler) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -176,14 +191,24 @@ func (h *Handler) handleCreateSubscription(w http.ResponseWriter, r *http.Reques
 		httperr.BadRequest(w, r, "plan_id is required", nil)
 		return
 	}
-	if req.PaymentMethod == "" {
-		req.PaymentMethod = store.PaymentMethodTypeEwallet
+	if req.PaymentMethodType == "" {
+		req.PaymentMethodType = store.PaymentMethodTypeEwallet
 	}
 
-	sub, err := h.service.SubscribePlan(r.Context(), userID, req.PlanID, req.PaymentMethod)
+	sub, err := h.service.SubscribePlan(r.Context(), CreateSubscriptionInput{
+		UserID:            userID,
+		PlanID:            req.PlanID,
+		ProjectID:         req.ProjectID,
+		UnitQuantity:      req.UnitQuantity,
+		PaymentMethodType: req.PaymentMethodType,
+	})
 	if err != nil {
 		if errors.Is(err, ErrPlanNotFound) {
 			httperr.NotFound(w, r, "Subscription plan not found")
+			return
+		}
+		if errors.Is(err, ErrProjectNotFound) {
+			httperr.NotFound(w, r, "Conservation project not found")
 			return
 		}
 		httperr.InternalServerError(w, r)
@@ -206,7 +231,10 @@ func (h *Handler) handleListSubscriptions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"subscriptions": subs})
+	if subs == nil {
+		subs = []SubscriptionDetailDTO{}
+	}
+	writeJSON(w, http.StatusOK, subs)
 }
 
 type verifyIAPRequest struct {
@@ -239,6 +267,14 @@ func (h *Handler) handleVerifyIAPReceipt(w http.ResponseWriter, r *http.Request)
 		ReceiptPayload: req.ReceiptPayload,
 	})
 	if err != nil {
+		if errors.Is(err, ErrIAPNotConfiguredInProduction) {
+			httperr.ServiceUnavailable(w, r, "In-app purchase receipt verification is disabled in production without server credentials")
+			return
+		}
+		if errors.Is(err, ErrProductNotFound) {
+			httperr.NotFound(w, r, "Product not found")
+			return
+		}
 		if errors.Is(err, ErrReceiptAlreadyUsed) {
 			httperr.Conflict(w, r, "IAP receipt has already been redeemed")
 			return
@@ -280,6 +316,10 @@ func (h *Handler) handlePauseSubscription(w http.ResponseWriter, r *http.Request
 			httperr.NotFound(w, r, "Subscription not found")
 			return
 		}
+		if errors.Is(err, ErrInvalidSubscriptionState) {
+			httperr.Conflict(w, r, "Subscription is not active and cannot be paused")
+			return
+		}
 		httperr.InternalServerError(w, r)
 		return
 	}
@@ -305,6 +345,10 @@ func (h *Handler) handleResumeSubscription(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		if errors.Is(err, ErrSubscriptionNotFound) {
 			httperr.NotFound(w, r, "Subscription not found")
+			return
+		}
+		if errors.Is(err, ErrInvalidSubscriptionState) {
+			httperr.Conflict(w, r, "Subscription is not paused and cannot be resumed")
 			return
 		}
 		httperr.InternalServerError(w, r)
@@ -339,6 +383,10 @@ func (h *Handler) handleCancelSubscription(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		if errors.Is(err, ErrSubscriptionNotFound) {
 			httperr.NotFound(w, r, "Subscription not found")
+			return
+		}
+		if errors.Is(err, ErrInvalidSubscriptionState) {
+			httperr.Conflict(w, r, "Subscription cannot be cancelled from its current state")
 			return
 		}
 		httperr.InternalServerError(w, r)

@@ -20,6 +20,12 @@ type Config struct {
 	Email        EmailConfig
 	Notification NotificationConfig
 	OAuth        OAuthConfig
+	CV           CVConfig
+}
+
+// CVConfig defines external computer vision inference service settings.
+type CVConfig struct {
+	ServiceURL string
 }
 
 // AppConfig defines HTTP server and general application settings.
@@ -176,6 +182,9 @@ func Load() (*Config, error) {
 		},
 		OAuth: OAuthConfig{
 			GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
+		},
+		CV: CVConfig{
+			ServiceURL: getEnv("CV_SERVICE_URL", ""),
 		},
 	}
 

@@ -50,6 +50,53 @@ services:
       exit 0;
       "
 
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: bioverse-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      PORT: 8080
+      DATABASE_URL: postgres://${DB_USER:-bioverse}:${DB_PASSWORD:-bioverse_dev}@postgres:5432/${DB_NAME:-bioverse}?sslmode=disable
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-bioverse_minio}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-bioverse_minio_secret}
+      STORAGE_BUCKET_NAME: ${STORAGE_BUCKET_NAME:-bioverse-media}
+      STORAGE_USE_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET:-super_secret_key_bioverse_2026_change_in_production}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      HMAC_SECRET: ${HMAC_SECRET:-hmac_secret_key_for_searchable_hashes}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-xnd_development_placeholder}
+      XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-webhook_verification_token_placeholder}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: bioverse-worker
+    restart: unless-stopped
+    command: ["/app/bioverse-worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgres://${DB_USER:-bioverse}:${DB_PASSWORD:-bioverse_dev}@postgres:5432/${DB_NAME:-bioverse}?sslmode=disable
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-bioverse_minio}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-bioverse_minio_secret}
+      STORAGE_BUCKET_NAME: ${STORAGE_BUCKET_NAME:-bioverse-media}
+      STORAGE_USE_SSL: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   bioverse_pgdata:
     driver: local

@@ -827,6 +827,52 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/app/donations/history:
+    get:
+      tags:
+        - Donations
+      summary: List user donation history (alias)
+      description: Retrieves paginated history of past donations with filter options (alias of /v1/app/donations).
+      operationId: listDonationHistoryAlias
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PaymentStatus'
+        - name: donation_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DonationType'
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor for keyset pagination
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Paginated donation history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDonations'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/app/pets:
     get:
       tags:
@@ -1286,6 +1332,35 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/app/inventory/streak-freeze/use:
+    post:
+      tags:
+        - Shop & Inventory
+      summary: Use streak freeze item
+      description: Consumes 1 streak freeze item from inventory to protect the daily streak.
+      operationId: useStreakFreeze
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Streak freeze applied successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    example: streak_freeze_applied
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/app/catalog/plans:
     get:
       tags:
@@ -1656,6 +1731,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/admin/fieldops/operators/{id}:
+    get:
+      tags:
+        - Admin Field Operations
+      summary: Get field operator details (Admin only)
+      description: Retrieves profile, KYC, encrypted NIK details, and active status for a specific operator.
+      operationId: getFieldOperatorDetail
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Operator UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Field operator detail retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/admin/fieldops/work-logs:
     post:
       tags:
@@ -1849,6 +1959,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/B2bCompanyDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/b2b/companies/{id}/members:
+    post:
+      tags:
+        - Admin B2B & ESG
+      summary: Add corporate team member (Admin only)
+      description: Registers an employee or manager under an onboarded corporate partnership.
+      operationId: addCompanyMember
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCompanyMemberRequest'
+      responses:
+        '201':
+          description: Member added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyMember'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      tags:
+        - Admin B2B & ESG
+      summary: List corporate team members (Admin only)
+      description: Retrieves all registered employees and managers under an onboarded company.
+      operationId: listCompanyMembers
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of company team members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CompanyMember'
         '400':
           $ref: '#/components/responses/BadRequestError'
         '401':
@@ -4046,6 +4228,71 @@ components:
           type: string
         member_role:
           $ref: '#/components/schemas/B2bRole'
+        created_at:
+          type: string
+          format: date-time
+
+    AddCompanyMemberRequest:
+      type: object
+      required:
+        - full_name
+        - email
+        - role
+        - permission
+      properties:
+        full_name:
+          type: string
+          example: Rina Melati
+        email:
+          type: string
+          format: email
+          example: rina@samudera.test
+        role:
+          $ref: '#/components/schemas/B2bRole'
+        permission:
+          type: string
+          enum:
+            - admin
+            - read_write
+            - read_only
+          example: admin
+
+    CompanyMember:
+      type: object
+      required:
+        - id
+        - company_id
+        - full_name
+        - email
+        - role
+        - is_active
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        full_name:
+          type: string
+          example: Rina Melati
+        email:
+          type: string
+          format: email
+          example: rina@samudera.test
+        role:
+          $ref: '#/components/schemas/B2bRole'
+        permission:
+          type: string
+          enum:
+            - admin
+            - read_write
+            - read_only
+          example: admin
+        is_active:
+          type: boolean
+          example: true
         created_at:
           type: string
           format: date-time

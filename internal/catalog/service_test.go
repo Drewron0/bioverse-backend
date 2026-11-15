@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/config"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/google/uuid"
 )
 
 func TestCatalogAndInventoryEndToEnd(t *testing.T) {
@@ -56,7 +58,8 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 	}
 
 	// 3. Invariant Test: User with 0 points cannot purchase product (ErrInsufficientPoints)
-	_, err = catalogSvc.BuyProductWithPoints(ctx, userID, prod.ID, 1)
+	idempotencyKey := uuid.New().String()
+	_, err = catalogSvc.BuyProductWithPoints(ctx, userID, prod.ID, 1, idempotencyKey)
 	if err == nil {
 		t.Fatalf("expected ErrInsufficientPoints, got nil")
 	}
@@ -76,16 +79,28 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 		t.Fatalf("failed to credit points: %v", err)
 	}
 
-	// 6. Buy Streak Freeze product with points
-	inv, err := catalogSvc.BuyProductWithPoints(ctx, userID, prod.ID, 1)
+	// 6. Buy Streak Freeze product with points (with idempotency key)
+	buyRes, err := catalogSvc.BuyProductWithPoints(ctx, userID, prod.ID, 1, idempotencyKey)
 	if err != nil {
 		t.Fatalf("failed to purchase product: %v", err)
 	}
-	if inv.Quantity != 1 {
-		t.Errorf("expected quantity 1, got %d", inv.Quantity)
+	if buyRes.SkuCode != "STREAK_FREEZE_1X" {
+		t.Errorf("expected sku STREAK_FREEZE_1X, got %s", buyRes.SkuCode)
+	}
+	if buyRes.RemainingPointsBalance != 350 {
+		t.Errorf("expected remaining points 350, got %d", buyRes.RemainingPointsBalance)
 	}
 
-	// 7. Verify points balance deducted (500 - 150 = 350)
+	// 6b. Test Idempotency: Re-submitting with the same Idempotency-Key must not deduct points again!
+	idempotentRes, err := catalogSvc.BuyProductWithPoints(ctx, userID, prod.ID, 1, idempotencyKey)
+	if err != nil {
+		t.Fatalf("idempotent purchase failed: %v", err)
+	}
+	if idempotentRes.RemainingPointsBalance != 350 {
+		t.Errorf("expected remaining points still 350 on retry, got %d", idempotentRes.RemainingPointsBalance)
+	}
+
+	// 7. Verify points balance deducted exactly once (500 - 150 = 350)
 	user, err := queries.GetUserByID(ctx, userID)
 	if err != nil {
 		t.Fatalf("failed to get user: %v", err)
@@ -109,18 +124,66 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 		t.Errorf("expected 0 active items after consumption, got %d", len(items))
 	}
 
-	// 10. Subscribe to BioVerse Plus Monthly plan
+	// 10. Subscribe to BioVerse Plus Monthly plan with multi-currency verification
 	plans, err := catalogSvc.ListSubscriptionPlans(ctx, "USD")
 	if err != nil || len(plans) == 0 {
 		t.Fatalf("expected plans in catalog, got %v", err)
 	}
+	if len(plans[0].Prices) == 0 {
+		t.Errorf("expected multi-currency prices array in subscription plan")
+	}
 
-	sub, err := catalogSvc.SubscribePlan(ctx, userID, plans[0].ID, store.PaymentMethodTypeEwallet)
+	// Fetch seeded project for adoption subscription
+	seededProjectID := uuid.MustParse("0193297a-96e0-7988-9271-e0e649ce4201")
+	sub, err := catalogSvc.SubscribePlan(ctx, catalog.CreateSubscriptionInput{
+		UserID:            userID,
+		PlanID:            plans[0].ID,
+		ProjectID:         seededProjectID,
+		UnitQuantity:      1,
+		PaymentMethodType: store.PaymentMethodTypeEwallet,
+	})
 	if err != nil {
 		t.Fatalf("failed to create subscription: %v", err)
 	}
 	if sub.Status != store.SubscriptionStatusActive {
 		t.Errorf("expected active subscription, got %v", sub.Status)
+	}
+	if sub.PlanName == "" {
+		t.Errorf("expected plan name to be populated")
+	}
+	if sub.AuthorizationURL == nil || *sub.AuthorizationURL == "" {
+		t.Errorf("expected authorization URL to be present")
+	}
+
+	// 11. Test Subscription State Machine: Pause -> Resume -> Cancel
+	pausedSub, err := catalogSvc.PauseSubscription(ctx, userID, sub.ID, "Traveling this month")
+	if err != nil {
+		t.Fatalf("failed to pause subscription: %v", err)
+	}
+	if pausedSub.Status != store.SubscriptionStatusPaused {
+		t.Errorf("expected paused status, got %v", pausedSub.Status)
+	}
+
+	// Pausing again when already paused must fail
+	_, err = catalogSvc.PauseSubscription(ctx, userID, sub.ID, "Already paused")
+	if !errors.Is(err, catalog.ErrInvalidSubscriptionState) {
+		t.Errorf("expected ErrInvalidSubscriptionState when pausing already paused sub, got %v", err)
+	}
+
+	resumedSub, err := catalogSvc.ResumeSubscription(ctx, userID, sub.ID)
+	if err != nil {
+		t.Fatalf("failed to resume subscription: %v", err)
+	}
+	if resumedSub.Status != store.SubscriptionStatusActive {
+		t.Errorf("expected active status after resume, got %v", resumedSub.Status)
+	}
+
+	cancelledSub, err := catalogSvc.CancelSubscription(ctx, userID, sub.ID, "No longer needed")
+	if err != nil {
+		t.Fatalf("failed to cancel subscription: %v", err)
+	}
+	if cancelledSub.Status != store.SubscriptionStatusCancelled {
+		t.Errorf("expected cancelled status, got %v", cancelledSub.Status)
 	}
 
 	subs, err := catalogSvc.ListUserSubscriptions(ctx, userID)

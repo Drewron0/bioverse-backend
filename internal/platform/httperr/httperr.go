@@ -83,6 +83,11 @@ func TooManyRequests(w http.ResponseWriter, r *http.Request, retryAfterSeconds i
 	Respond(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too Many Requests", detail, nil)
 }
 
+// ServiceUnavailable writes a 503 Service Unavailable problem response.
+func ServiceUnavailable(w http.ResponseWriter, r *http.Request, detail string) {
+	Respond(w, r, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Service Unavailable", detail, nil)
+}
+
 // InternalServerError writes a 500 Internal Server Error problem response.
 func InternalServerError(w http.ResponseWriter, r *http.Request) {
 	Respond(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal Server Error", "An unexpected error occurred.", nil)

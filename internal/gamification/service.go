@@ -1,6 +1,7 @@
 package gamification
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
@@ -69,6 +72,71 @@ func (v *StubCVVerifier) VerifyProof(_ context.Context, targetLabel string, minC
 		JobID:           fmt.Sprintf("cv-job-%d", time.Now().UnixNano()),
 		RawResponse:     []byte(fmt.Sprintf(`{"detected": "%s", "confidence": %.2f, "status": "approved"}`, targetLabel, confidence.InexactFloat64())),
 		RejectionReason: rejection,
+	}, nil
+}
+
+// HTTPCVVerifier evaluates proof images via an external computer vision inference service.
+type HTTPCVVerifier struct {
+	client     *http.Client
+	serviceURL string
+}
+
+// NewHTTPCVVerifier creates a verifier targeting an external CV inference service.
+func NewHTTPCVVerifier(serviceURL string) *HTTPCVVerifier {
+	return &HTTPCVVerifier{
+		client:     &http.Client{Timeout: 10 * time.Second},
+		serviceURL: strings.TrimRight(serviceURL, "/"),
+	}
+}
+
+// VerifyProof evaluates proof images with external CV service if configured, or falls back to stub.
+func (v *HTTPCVVerifier) VerifyProof(ctx context.Context, targetLabel string, minConfidence decimal.Decimal, imageURL string) (CVResult, error) {
+	if v.serviceURL == "" {
+		stub := &StubCVVerifier{}
+		return stub.VerifyProof(ctx, targetLabel, minConfidence, imageURL)
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"image_url":      imageURL,
+		"target_label":   targetLabel,
+		"min_confidence": minConfidence.InexactFloat64(),
+	})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.serviceURL+"/verify", bytes.NewReader(payload))
+	if err != nil {
+		return CVResult{}, fmt.Errorf("failed to create cv inference request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return CVResult{}, fmt.Errorf("cv inference service call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return CVResult{}, fmt.Errorf("cv inference returned HTTP %d", resp.StatusCode)
+	}
+
+	var cvResp struct {
+		Passed          bool    `json:"passed"`
+		ConfidenceScore float64 `json:"confidence_score"`
+		DetectedLabel   string  `json:"detected_label"`
+		ModelVersion    string  `json:"model_version"`
+		RejectionReason string  `json:"rejection_reason"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&cvResp); err != nil {
+		return CVResult{}, fmt.Errorf("failed to decode cv response: %w", err)
+	}
+
+	conf := decimal.NewFromFloat(cvResp.ConfidenceScore)
+	return CVResult{
+		Passed:          cvResp.Passed && conf.GreaterThanOrEqual(minConfidence),
+		ConfidenceScore: conf,
+		DetectedLabel:   cvResp.DetectedLabel,
+		ModelVersion:    cvResp.ModelVersion,
+		JobID:           fmt.Sprintf("cv-job-%d", time.Now().UnixNano()),
+		RejectionReason: cvResp.RejectionReason,
 	}, nil
 }
 
