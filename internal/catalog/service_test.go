@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/catalog"
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/catalog"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 )
 
 func TestCatalogAndInventoryEndToEnd(t *testing.T) {
@@ -30,7 +30,7 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 
 	queries := store.New(pool)
 	catalogSvc := catalog.NewService(pool, queries)
-	identitySvc := identity.NewService(pool, queries, cfg)
+	identitySvc := identity.NewService(pool, queries, cfg, nil, nil)
 
 	// 1. Register test user
 	uniqueSuffix := time.Now().UnixNano()

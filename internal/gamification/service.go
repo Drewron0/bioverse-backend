@@ -4,14 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/decimalutil"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -531,6 +532,25 @@ func (s *Service) GetLeaderboard(ctx context.Context, limit, offset int32) ([]st
 		Limit:  limit,
 		Offset: offset,
 	})
+}
+
+// GetPointConversionRate retrieves the dynamic points-to-USD rate from app_settings using decimal precision.
+func (s *Service) GetPointConversionRate(ctx context.Context) decimal.Decimal {
+	setting, err := s.store.GetAppSetting(ctx, "points_per_usd")
+	if err == nil && len(setting.SettingValue) > 0 {
+		var valStr string
+		if err := json.Unmarshal(setting.SettingValue, &valStr); err == nil {
+			if d, err := decimal.NewFromString(valStr); err == nil && d.IsPositive() {
+				return d
+			}
+		}
+		var valNum float64
+		if err := json.Unmarshal(setting.SettingValue, &valNum); err == nil && valNum > 0 {
+			return decimal.NewFromFloat(valNum)
+		}
+	}
+	// Fallback to standard 100 points = 1 USD (seeded in migration)
+	return decimal.NewFromInt(100)
 }
 
 // Helpers

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -18,17 +18,17 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{service: svc}
 }
 
-// RegisterRoutes mounts upload endpoints on the router.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+// RegisterRoutes mounts upload endpoints on the router with appropriate privilege gates.
+func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMiddleware func(http.Handler) http.Handler) {
 	// Consumer uploads
 	r.Route("/v1/app/uploads", func(ur chi.Router) {
-		ur.Use(authMiddleware)
+		ur.Use(userAuthMiddleware)
 		ur.Post("/presign", h.handleUserPresign)
 	})
 
 	// Administrative uploads
 	r.Route("/v1/admin/uploads", func(ar chi.Router) {
-		ar.Use(authMiddleware)
+		ar.Use(adminAuthMiddleware)
 		ar.Post("/presign", h.handleAdminPresign)
 	})
 }

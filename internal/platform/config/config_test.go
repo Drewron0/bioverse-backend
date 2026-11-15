@@ -31,3 +31,19 @@ func TestConfigLoadDefaults(t *testing.T) {
 		t.Errorf("expected access expiry 15m, got %v", cfg.Auth.AccessExpiry)
 	}
 }
+
+func TestConfigProductionRejectsDefaultSecrets(t *testing.T) {
+	_ = os.Setenv("APP_ENV", "production")
+	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	_ = os.Setenv("JWT_SECRET", "super_secret_key_bioverse_2026_change_in_production")
+	defer func() {
+		_ = os.Unsetenv("APP_ENV")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("JWT_SECRET")
+	}()
+
+	_, err := Load()
+	if err == nil {
+		t.Fatalf("expected error when loading default secret in production, got nil")
+	}
+}

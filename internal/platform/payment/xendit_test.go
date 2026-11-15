@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/payment"
+	"github.com/Drewron0/bioverse-backend/internal/platform/payment"
 	"github.com/shopspring/decimal"
 )
 

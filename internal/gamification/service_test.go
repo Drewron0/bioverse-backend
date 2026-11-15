@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/gamification"
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/gamification"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 )
 
@@ -30,7 +30,7 @@ func TestGamificationEndToEnd(t *testing.T) {
 	defer pool.Close()
 
 	q := store.New(pool)
-	identitySvc := identity.NewService(pool, q, cfg)
+	identitySvc := identity.NewService(pool, q, cfg, nil, nil)
 	gamifySvc := gamification.NewService(pool, q, nil)
 
 	// 1. Register test user

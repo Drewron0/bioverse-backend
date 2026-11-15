@@ -5,11 +5,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Drewron01/bioverse-backend/internal/upload"
+	"github.com/Drewron0/bioverse-backend/internal/upload"
 )
 
 func TestRequestPresignedUpload(t *testing.T) {
-	svc := upload.NewService("https://storage.bioverse.id")
+	svc := upload.NewService(upload.Config{
+		Endpoint:   "https://storage.bioverse.id",
+		BucketName: "bioverse-media",
+		AccessKey:  "test-access-key",
+		SecretKey:  "test-secret-key",
+		Region:     "us-east-1",
+	})
 	ctx := context.Background()
 
 	tests := []struct {
@@ -132,6 +138,12 @@ func TestRequestPresignedUpload(t *testing.T) {
 			}
 			if res.Headers["Content-Type"] != tt.contentType {
 				t.Errorf("expected Content-Type %s, got %s", tt.contentType, res.Headers["Content-Type"])
+			}
+			if !strings.Contains(res.UploadURL, "X-Amz-Signature=") {
+				t.Errorf("expected UploadURL to contain SigV4 signature, got %s", res.UploadURL)
+			}
+			if !strings.Contains(res.UploadURL, "X-Amz-Algorithm=AWS4-HMAC-SHA256") {
+				t.Errorf("expected UploadURL to contain SigV4 algorithm, got %s", res.UploadURL)
 			}
 			if res.MaxSizeBytes != upload.MaxUploadSizeBytes {
 				t.Errorf("expected max_size_bytes %d, got %d", upload.MaxUploadSizeBytes, res.MaxSizeBytes)

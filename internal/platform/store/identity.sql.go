@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const confirmAdminMFA = `-- name: ConfirmAdminMFA :exec
+UPDATE platform_admins
+SET mfa_enabled = true,
+    mfa_verified_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) ConfirmAdminMFA(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, confirmAdminMFA, id)
+	return err
+}
+
 const createAdminToken = `-- name: CreateAdminToken :one
 INSERT INTO admin_tokens (
     id, admin_id, token_type, token_hash, device_info, ip_address, expires_at
@@ -268,6 +280,35 @@ func (q *Queries) GetPlatformAdminByEmail(ctx context.Context, email string) (Pl
 	return i, err
 }
 
+const getPlatformAdminByID = `-- name: GetPlatformAdminByID :one
+SELECT id, full_name, email, password_hash, role, mfa_enabled, mfa_secret_encrypted, 
+       mfa_verified_at, failed_login_count, locked_until, last_login_at, is_active, created_at
+FROM platform_admins
+WHERE id = $1 AND is_active = true
+LIMIT 1
+`
+
+func (q *Queries) GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (PlatformAdmins, error) {
+	row := q.db.QueryRow(ctx, getPlatformAdminByID, id)
+	var i PlatformAdmins
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.MfaEnabled,
+		&i.MfaSecretEncrypted,
+		&i.MfaVerifiedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
+		&i.LastLoginAt,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, full_name, email, is_email_verified, password_hash, google_id, 
        phone_number, date_of_birth, gender, timezone, preferred_currency_code, 
@@ -414,6 +455,42 @@ func (q *Queries) MarkUserTokenUsed(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const recordAdminLoginFailure = `-- name: RecordAdminLoginFailure :one
+UPDATE platform_admins
+SET failed_login_count = failed_login_count + 1,
+    locked_until = CASE 
+        WHEN failed_login_count + 1 >= 5 THEN NOW() + INTERVAL '15 minutes' 
+        ELSE locked_until 
+    END
+WHERE id = $1
+RETURNING failed_login_count, locked_until
+`
+
+type RecordAdminLoginFailureRow struct {
+	FailedLoginCount int32              `json:"failed_login_count"`
+	LockedUntil      pgtype.Timestamptz `json:"locked_until"`
+}
+
+func (q *Queries) RecordAdminLoginFailure(ctx context.Context, id uuid.UUID) (RecordAdminLoginFailureRow, error) {
+	row := q.db.QueryRow(ctx, recordAdminLoginFailure, id)
+	var i RecordAdminLoginFailureRow
+	err := row.Scan(&i.FailedLoginCount, &i.LockedUntil)
+	return i, err
+}
+
+const recordAdminLoginSuccess = `-- name: RecordAdminLoginSuccess :exec
+UPDATE platform_admins
+SET failed_login_count = 0,
+    locked_until = NULL,
+    last_login_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) RecordAdminLoginSuccess(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, recordAdminLoginSuccess, id)
+	return err
+}
+
 const revokeAdminToken = `-- name: RevokeAdminToken :exec
 UPDATE admin_tokens
 SET revoked_at = NOW()
@@ -449,6 +526,23 @@ WHERE id = $1
 
 func (q *Queries) RevokeUserToken(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeUserToken, id)
+	return err
+}
+
+const updateAdminMFASecret = `-- name: UpdateAdminMFASecret :exec
+UPDATE platform_admins
+SET mfa_secret_encrypted = $2,
+    mfa_enabled = false
+WHERE id = $1
+`
+
+type UpdateAdminMFASecretParams struct {
+	ID                 uuid.UUID `json:"id"`
+	MfaSecretEncrypted []byte    `json:"mfa_secret_encrypted"`
+}
+
+func (q *Queries) UpdateAdminMFASecret(ctx context.Context, arg UpdateAdminMFASecretParams) error {
+	_, err := q.db.Exec(ctx, updateAdminMFASecret, arg.ID, arg.MfaSecretEncrypted)
 	return err
 }
 

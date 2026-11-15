@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/decimalutil"
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 )
 
 func TestIdentityEndToEndFlow(t *testing.T) {
@@ -27,7 +27,7 @@ func TestIdentityEndToEndFlow(t *testing.T) {
 	defer pool.Close()
 
 	queries := store.New(pool)
-	service := NewService(pool, queries, cfg)
+	service := NewService(pool, queries, cfg, nil, nil)
 
 	uniqueSuffix := time.Now().UnixNano()
 	testEmail := fmt.Sprintf("testuser_%d@bioverse.id", uniqueSuffix)

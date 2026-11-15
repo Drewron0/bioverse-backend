@@ -3,15 +3,15 @@ package gamification
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // Handler serves HTTP endpoints for the gamification domain.
@@ -402,14 +402,21 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rate := h.service.GetPointConversionRate(r.Context())
+	if rate.IsZero() {
+		rate = decimal.NewFromInt(100)
+	}
+
 	rankings := make([]leaderboardEntryResponse, 0, len(board))
 	for _, b := range board {
 		var avatar *string
 		if b.AvatarUrl.Valid && b.AvatarUrl.String != "" {
 			avatar = &b.AvatarUrl.String
 		}
-		usd := fmt.Sprintf("%.2f", float64(b.PointsBalance)*0.10)
-		units := b.PointsBalance / 10
+		pointsDec := decimal.NewFromInt(b.PointsBalance)
+		usdDec := pointsDec.DivRound(rate, 2)
+		usd := usdDec.StringFixed(2)
+		units := b.PointsBalance / 100
 
 		rankings = append(rankings, leaderboardEntryResponse{
 			Rank:              b.RankPosition,

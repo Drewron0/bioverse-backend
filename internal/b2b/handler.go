@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -23,10 +23,10 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{service: svc}
 }
 
-// RegisterRoutes registers B2B endpoints on the router.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+// RegisterRoutes registers B2B endpoints restricted to administrators.
+func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware func(http.Handler) http.Handler) {
 	r.Group(func(protected chi.Router) {
-		protected.Use(authMiddleware)
+		protected.Use(adminMiddleware)
 
 		// Admin B2B & ESG endpoints
 		protected.Post("/v1/admin/b2b/companies", h.handleRegisterCompany)
@@ -37,17 +37,6 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		protected.Post("/v1/admin/b2b/companies/{id}/esg/metrics", h.handleRecordESGMetric)
 		protected.Post("/v1/admin/b2b/companies/{id}/esg/reports", h.handleGenerateESGReport)
 		protected.Get("/v1/admin/b2b/companies/{id}/esg/reports", h.handleListESGReports)
-
-		// Backward-compatible B2B routes
-		protected.Post("/v1/b2b/companies", h.handleRegisterCompany)
-		protected.Get("/v1/b2b/companies/{id}", h.handleGetCompany)
-		protected.Post("/v1/b2b/companies/{id}/members", h.handleAddMember)
-		protected.Get("/v1/b2b/companies/{id}/members", h.handleListMembers)
-		protected.Post("/v1/b2b/companies/{id}/contracts", h.handleCreateContract)
-		protected.Post("/v1/b2b/quotas/{id}/claim", h.handleClaimQuota)
-		protected.Post("/v1/b2b/companies/{id}/esg/metrics", h.handleRecordESGMetric)
-		protected.Post("/v1/b2b/companies/{id}/esg/reports", h.handleGenerateESGReport)
-		protected.Get("/v1/b2b/companies/{id}/esg/reports", h.handleListESGReports)
 	})
 }
 

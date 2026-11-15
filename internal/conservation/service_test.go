@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/conservation"
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/conservation"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 )
 
 func TestConservationService(t *testing.T) {

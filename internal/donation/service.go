@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/conservation"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/decimalutil"
-	"github.com/Drewron01/bioverse-backend/internal/platform/payment"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/conservation"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
+	"github.com/Drewron0/bioverse-backend/internal/platform/payment"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -27,6 +28,8 @@ var (
 	ErrInsufficientPoints = errors.New("insufficient points balance")
 	// ErrIdempotencyKeyReused indicates idempotency key was previously used with different parameters.
 	ErrIdempotencyKeyReused = errors.New("idempotency key reused with different parameters")
+	// ErrAmountMismatch indicates payment amount reported by gateway doesn't match donation.
+	ErrAmountMismatch = errors.New("settlement amount mismatch between webhook and donation record")
 )
 
 // CheckoutInput represents input payload for creating a donation.
@@ -355,7 +358,7 @@ func (s *Service) ProcessPaidDonation(ctx context.Context, donationID uuid.UUID,
 			ID:                 donationID,
 			PaymentStatus:      store.PaymentStatusPaid,
 			PaidAt:             pgtype.Timestamptz{Time: now, Valid: true},
-			ExternalGatewayRef: pgtype.Text{String: fmt.Sprintf("XND-SIM-%s", donationID.String()[:8]), Valid: true},
+			ExternalGatewayRef: pgtype.Text{String: fmt.Sprintf("XND-SIM-%s", donationID.String()), Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to mark donation as paid: %w", err)
@@ -441,4 +444,147 @@ func (s *Service) GetDonation(ctx context.Context, id uuid.UUID) (*store.Donatio
 // ListUserDonations lists all donations made by the user.
 func (s *Service) ListUserDonations(ctx context.Context, userID uuid.UUID) ([]store.ListDonationsByUserIDRow, error) {
 	return s.store.ListDonationsByUserID(ctx, userID)
+}
+
+// ListUserDonationsWithCursor returns paginated donation history with next cursor.
+func (s *Service) ListUserDonationsWithCursor(ctx context.Context, userID uuid.UUID, cursor *time.Time, limit int) ([]store.ListDonationsByUserIDWithCursorRow, *string, error) {
+	if limit <= 0 {
+		limit = 10
+	} else if limit > 50 {
+		limit = 50
+	}
+
+	var cursorCreatedAt pgtype.Timestamptz
+	if cursor != nil {
+		cursorCreatedAt = pgtype.Timestamptz{Time: *cursor, Valid: true}
+	}
+
+	rows, err := s.store.ListDonationsByUserIDWithCursor(ctx, store.ListDonationsByUserIDWithCursorParams{
+		UserID:          userID,
+		Limit:           int32(limit),
+		CursorCreatedAt: cursorCreatedAt,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list user donations with cursor: %w", err)
+	}
+
+	var nextCursor *string
+	if len(rows) == limit {
+		lastCreatedAt := rows[len(rows)-1].CreatedAt.Time.Format(time.RFC3339Nano)
+		nextCursor = &lastCreatedAt
+	}
+
+	return rows, nextCursor, nil
+}
+
+// ProcessXenditInvoiceWebhook handles idempotency deduplication via webhook_events, nominal checking, and atomic execution.
+func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEventID, externalID, status string, amount float64, rawPayload []byte) error {
+	if !strings.HasPrefix(externalID, "donation_") {
+		return nil
+	}
+
+	donationIDStr := strings.TrimPrefix(externalID, "donation_")
+	donationID, err := uuid.Parse(donationIDStr)
+	if err != nil {
+		return fmt.Errorf("invalid donation UUID in external_id: %w", err)
+	}
+
+	if externalEventID == "" {
+		externalEventID = fmt.Sprintf("%s_%s", externalID, strings.ToLower(status))
+	}
+
+	// 1. Check idempotency deduplication in webhook_events
+	existingEvent, err := s.store.GetWebhookEventByProviderAndExternalID(ctx, store.GetWebhookEventByProviderAndExternalIDParams{
+		Provider:        "xendit",
+		ExternalEventID: externalEventID,
+	})
+	if err == nil {
+		if existingEvent.Status == store.WebhookProcessStatusProcessed {
+			// Already processed successfully: idempotent return
+			return nil
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("failed to query webhook_events: %w", err)
+	} else {
+		// Insert initial event record
+		eventID, _ := uuid.NewV7()
+		_, _ = s.store.RecordWebhookEvent(ctx, store.RecordWebhookEventParams{
+			ID:              eventID,
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			EventType:       "invoice." + strings.ToLower(status),
+			Payload:         rawPayload,
+			Status:          store.WebhookProcessStatusPending,
+		})
+	}
+
+	if !strings.EqualFold(status, "PAID") {
+		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusIgnored,
+			ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		})
+		return nil
+	}
+
+	// 2. Fetch donation and verify amount
+	donation, err := s.store.GetDonationByID(ctx, donationID)
+	if err != nil {
+		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusFailed,
+			ErrorMessage:    pgtype.Text{String: "Donation record not found", Valid: true},
+		})
+		return ErrDonationNotFound
+	}
+
+	if donation.PaymentStatus == store.PaymentStatusPaid {
+		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusProcessed,
+			ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		})
+		return nil
+	}
+
+	paidAmountDec := decimal.NewFromFloat(amount)
+	expectedSettlement := decimalutil.FromNumeric(donation.SettlementAmount)
+	expectedMoney := decimalutil.FromNumeric(donation.MoneyAmountPaid)
+
+	// Check if payment amount matches either settlement amount or gross money paid
+	if !paidAmountDec.Equal(expectedSettlement) && !paidAmountDec.Equal(expectedMoney) {
+		errMsg := fmt.Sprintf("Amount mismatch: webhook reported %.2f, donation expects %s (settlement) or %s (money)",
+			amount, expectedSettlement.String(), expectedMoney.String())
+		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusFailed,
+			ErrorMessage:    pgtype.Text{String: errMsg, Valid: true},
+		})
+		return fmt.Errorf("%w: %s", ErrAmountMismatch, errMsg)
+	}
+
+	// 3. Mark donation as paid
+	_, err = s.ProcessPaidDonation(ctx, donationID, nil, "")
+	if err != nil {
+		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusFailed,
+			ErrorMessage:    pgtype.Text{String: err.Error(), Valid: true},
+		})
+		return fmt.Errorf("failed to process paid donation state: %w", err)
+	}
+
+	_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+		Provider:        "xendit",
+		ExternalEventID: externalEventID,
+		Status:          store.WebhookProcessStatusProcessed,
+		ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+
+	return nil
 }

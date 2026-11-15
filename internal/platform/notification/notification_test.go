@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/notification"
+	"github.com/Drewron0/bioverse-backend/internal/platform/notification"
 )
 
 func TestMockDispatcher(t *testing.T) {

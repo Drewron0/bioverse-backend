@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )

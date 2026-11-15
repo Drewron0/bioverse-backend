@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -22,7 +22,7 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // RegisterRoutes registers identity routes on the provided chi router.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMiddleware func(http.Handler) http.Handler) {
 	r.Route("/v1/app/auth", func(authRouter chi.Router) {
 		authRouter.Post("/register", h.handleRegister)
 		authRouter.Post("/login", h.handleLogin)
@@ -33,13 +33,13 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		authRouter.Post("/verify-email", h.handleVerifyEmail)
 
 		authRouter.Group(func(protected chi.Router) {
-			protected.Use(authMiddleware)
+			protected.Use(userAuthMiddleware)
 			protected.Post("/logout", h.handleLogout)
 		})
 	})
 
 	r.Route("/v1/app/users", func(userRouter chi.Router) {
-		userRouter.Use(authMiddleware)
+		userRouter.Use(userAuthMiddleware)
 		userRouter.Get("/me", h.handleGetMe)
 		userRouter.Patch("/me", h.handlePatchMe)
 		userRouter.Post("/fcm-token", h.handleFCMToken)
@@ -50,8 +50,10 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		adminAuth.Post("/refresh", h.handleAdminRefresh)
 
 		adminAuth.Group(func(protected chi.Router) {
-			protected.Use(authMiddleware)
+			protected.Use(adminAuthMiddleware)
 			protected.Post("/logout", h.handleAdminLogout)
+			protected.Post("/mfa/setup", h.handleAdminMFASetup)
+			protected.Post("/mfa/verify", h.handleAdminMFAVerify)
 		})
 	})
 }
@@ -475,6 +477,14 @@ func (h *Handler) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 			httperr.UnauthorizedWithCode(w, r, "MFA_REQUIRED", "Two-factor authentication TOTP code is required.")
 			return
 		}
+		if errors.Is(err, ErrAccountLocked) {
+			httperr.UnauthorizedWithCode(w, r, "ACCOUNT_LOCKED", "Admin account is temporarily locked due to repeated failed logins. Please try again after 15 minutes.")
+			return
+		}
+		if errors.Is(err, ErrInvalidTOTPCode) {
+			httperr.UnauthorizedWithCode(w, r, "INVALID_TOTP", "Invalid two-factor authentication code.")
+			return
+		}
 		httperr.Unauthorized(w, r, "Invalid admin credentials.")
 		return
 	}
@@ -487,6 +497,58 @@ func (h *Handler) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		TokenType:    "Bearer",
 		ExpiresIn:    result.ExpiresIn,
 		AdminRole:    result.AdminRole,
+	})
+}
+
+func (h *Handler) handleAdminMFASetup(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := GetAdminIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Admin authentication required.")
+		return
+	}
+
+	setup, err := h.service.AdminSetupMFA(r.Context(), adminID)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(setup)
+}
+
+type mfaVerifyRequest struct {
+	TOTPCode string `json:"totp_code"`
+}
+
+func (h *Handler) handleAdminMFAVerify(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := GetAdminIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Admin authentication required.")
+		return
+	}
+
+	var req mfaVerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.TOTPCode) == "" {
+		httperr.BadRequest(w, r, "Valid totp_code is required.", nil)
+		return
+	}
+
+	if err := h.service.AdminVerifyMFA(r.Context(), adminID, req.TOTPCode); err != nil {
+		if errors.Is(err, ErrInvalidTOTPCode) {
+			httperr.UnauthorizedWithCode(w, r, "INVALID_TOTP", "Invalid TOTP verification code.")
+			return
+		}
+		httperr.BadRequest(w, r, err.Error(), nil)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Two-factor authentication (MFA) enrolled and activated successfully.",
 	})
 }
 

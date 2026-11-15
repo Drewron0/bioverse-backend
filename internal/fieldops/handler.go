@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -23,10 +23,10 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{service: svc}
 }
 
-// RegisterRoutes mounts fieldops endpoints.
-func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+// RegisterRoutes mounts fieldops endpoints restricted to administrators.
+func (h *Handler) RegisterRoutes(r chi.Router, adminMiddleware func(http.Handler) http.Handler) {
 	r.Group(func(protected chi.Router) {
-		protected.Use(authMiddleware)
+		protected.Use(adminMiddleware)
 
 		// Admin Field Operations routes
 		protected.Post("/v1/admin/fieldops/operators", h.handleRegisterOperator)
@@ -36,13 +36,6 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 		protected.Post("/v1/admin/fieldops/payouts", h.handleCreatePayout)
 		protected.Post("/v1/admin/fieldops/payouts/{id}/approve", h.handleApprovePayout)
 		protected.Post("/v1/admin/fieldops/payouts/{id}/disburse", h.handleDisbursePayout)
-
-		// Backward-compatible app aliases
-		protected.Post("/v1/app/fieldops/operators", h.handleRegisterOperator)
-		protected.Get("/v1/app/fieldops/operators/{id}", h.handleGetOperator)
-		protected.Post("/v1/app/fieldops/work-logs", h.handleRecordWorkLog)
-		protected.Post("/v1/app/fieldops/media", h.handleRecordMedia)
-		protected.Post("/v1/app/fieldops/payouts", h.handleCreatePayout)
 	})
 }
 

@@ -42,6 +42,15 @@ JOIN conservation_projects cp ON d.project_id = cp.id
 WHERE d.user_id = $1
 ORDER BY d.created_at DESC;
 
+-- name: ListDonationsByUserIDWithCursor :many
+SELECT d.*, cp.title AS project_title
+FROM donations d
+JOIN conservation_projects cp ON d.project_id = cp.id
+WHERE d.user_id = $1
+  AND (sqlc.narg('cursor_created_at')::timestamptz IS NULL OR d.created_at < sqlc.narg('cursor_created_at')::timestamptz)
+ORDER BY d.created_at DESC
+LIMIT $2;
+
 -- name: ListExpiredPendingDonations :many
 SELECT * FROM donations
 WHERE payment_status = 'pending' AND expired_at < NOW()

@@ -17,7 +17,7 @@ Di folder lokal saat ini, Git sudah diinisialisasi dan commit fondasi awal sudah
    - Klik **Create repository**.
 3. Di terminal lokal (PowerShell pada root folder `bioverse-backend`), jalankan perintah berikut:
    ```powershell
-   git remote add origin https://github.com/Drewron01/bioverse-backend.git
+   git remote add origin https://github.com/Drewron0/bioverse-backend.git
    git branch -M main
    git push -u origin main
    ```

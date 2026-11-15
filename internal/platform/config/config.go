@@ -183,6 +183,25 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DATABASE_URL must not be empty")
 	}
 
+	// In staging and production environments, enforce strict cryptographic secrets
+	if cfg.App.Environment == "production" || cfg.App.Environment == "staging" {
+		if cfg.Auth.JWTSecret == "super_secret_key_bioverse_2026_change_in_production" || len(cfg.Auth.JWTSecret) < 32 {
+			return nil, fmt.Errorf("insecure or default JWT_SECRET configured for %s environment", cfg.App.Environment)
+		}
+		if cfg.Auth.AppEncryptionKey == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" || len(cfg.Auth.AppEncryptionKey) != 64 {
+			return nil, fmt.Errorf("insecure or default APP_ENCRYPTION_KEY configured for %s environment", cfg.App.Environment)
+		}
+		if cfg.Auth.HMACSecret == "hmac_secret_key_for_searchable_hashes" || len(cfg.Auth.HMACSecret) < 16 {
+			return nil, fmt.Errorf("insecure or default HMAC_SECRET configured for %s environment", cfg.App.Environment)
+		}
+		if cfg.Payment.XenditSecretKey == "xnd_development_placeholder" {
+			return nil, fmt.Errorf("insecure default XENDIT_SECRET_KEY configured for %s environment", cfg.App.Environment)
+		}
+		if cfg.Payment.XenditWebhookToken == "webhook_verification_token_placeholder" {
+			return nil, fmt.Errorf("insecure default XENDIT_WEBHOOK_TOKEN configured for %s environment", cfg.App.Environment)
+		}
+	}
+
 	return cfg, nil
 }
 

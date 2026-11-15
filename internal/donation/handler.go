@@ -1,28 +1,36 @@
 package donation
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // Handler serves HTTP endpoints for donation checkouts and webhook processing.
 type Handler struct {
-	service *Service
+	service      *Service
+	webhookToken string
+	isDev        bool
 }
 
 // NewHandler constructs a new donation HTTP handler.
-func NewHandler(svc *Service) *Handler {
-	return &Handler{service: svc}
+func NewHandler(svc *Service, webhookToken string, isDev bool) *Handler {
+	return &Handler{
+		service:      svc,
+		webhookToken: webhookToken,
+		isDev:        isDev,
+	}
 }
 
 // RegisterRoutes registers donation routes on the router.
@@ -37,7 +45,9 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 
 	r.Route("/v1/webhooks/xendit", func(wr chi.Router) {
 		wr.Post("/", h.handleXenditWebhook)
-		wr.Post("/simulate-paid", h.handleSimulatePaid)
+		if h.isDev {
+			wr.Post("/simulate-paid", h.handleSimulatePaid)
+		}
 	})
 }
 
@@ -243,9 +253,18 @@ func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
-	_ = limit
 
-	donations, err := h.service.ListUserDonations(r.Context(), userID)
+	var cursorTime *time.Time
+	cursorStr := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	if cursorStr != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, cursorStr); err == nil {
+			cursorTime = &parsed
+		} else if parsed, err := time.Parse(time.RFC3339, cursorStr); err == nil {
+			cursorTime = &parsed
+		}
+	}
+
+	items, nextCursor, err := h.service.ListUserDonationsWithCursor(r.Context(), userID, cursorTime, limit)
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return
@@ -254,8 +273,8 @@ func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"items":       donations,
-		"next_cursor": nil,
+		"items":       items,
+		"next_cursor": nextCursor,
 	})
 }
 
@@ -273,17 +292,31 @@ func (h *Handler) handleXenditWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.webhookToken != "" && subtle.ConstantTimeCompare([]byte(callbackToken), []byte(h.webhookToken)) != 1 {
+		httperr.Unauthorized(w, r, "Invalid x-callback-token webhook signature.")
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		httperr.BadRequest(w, r, "Failed to read webhook request body.", nil)
+		return
+	}
+
 	var payload xenditCallbackPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		httperr.BadRequest(w, r, "Invalid webhook payload JSON.", nil)
 		return
 	}
 
-	if strings.EqualFold(payload.Status, "PAID") && strings.HasPrefix(payload.ExternalID, "donation_") {
-		donationIDStr := strings.TrimPrefix(payload.ExternalID, "donation_")
-		if dID, err := uuid.Parse(donationIDStr); err == nil {
-			_, _ = h.service.ProcessPaidDonation(r.Context(), dID, nil, "")
+	err = h.service.ProcessXenditInvoiceWebhook(r.Context(), payload.ID, payload.ExternalID, payload.Status, payload.Amount, bodyBytes)
+	if err != nil {
+		if errors.Is(err, ErrAmountMismatch) {
+			httperr.BadRequest(w, r, err.Error(), nil)
+			return
 		}
+		httperr.InternalServerError(w, r)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

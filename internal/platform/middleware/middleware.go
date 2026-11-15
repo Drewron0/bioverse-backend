@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 )

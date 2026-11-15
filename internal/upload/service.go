@@ -2,8 +2,12 @@ package upload
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,7 +28,7 @@ const (
 // MaxUploadSizeBytes defines the maximum allowed upload payload (10 MB).
 const MaxUploadSizeBytes int64 = 10485760
 
-// PresignResult holds the generated upload URL, S3 object key, HTTP method, and required headers.
+// PresignResult holds the generated upload target URL, S3 object key, HTTP method, and required headers.
 type PresignResult struct {
 	UploadURL        string            `json:"upload_url"`
 	ObjectKey        string            `json:"object_key"`
@@ -34,20 +38,42 @@ type PresignResult struct {
 	MaxSizeBytes     int64             `json:"max_size_bytes"`
 }
 
-// Service provides presigned URL generation for client uploads.
+// Config defines connection details for S3 / MinIO storage.
+type Config struct {
+	Endpoint   string
+	AccessKey  string
+	SecretKey  string
+	BucketName string
+	Region     string
+	UseSSL     bool
+}
+
+// Service provides AWS SigV4 presigned URL generation for client uploads.
 type Service struct {
-	baseURL string
+	cfg Config
 }
 
-// NewService constructs a new upload service.
-func NewService(baseURL string) *Service {
-	if baseURL == "" {
-		baseURL = "https://storage.bioverse.id"
+// NewService constructs a new upload service with S3/MinIO configuration.
+func NewService(cfg Config) *Service {
+	if cfg.Endpoint == "" {
+		cfg.Endpoint = "http://127.0.0.1:9000"
 	}
-	return &Service{baseURL: strings.TrimRight(baseURL, "/")}
+	if cfg.BucketName == "" {
+		cfg.BucketName = "bioverse-media"
+	}
+	if cfg.Region == "" {
+		cfg.Region = "us-east-1"
+	}
+	if cfg.AccessKey == "" {
+		cfg.AccessKey = "bioverse_minio"
+	}
+	if cfg.SecretKey == "" {
+		cfg.SecretKey = "bioverse_minio_secret"
+	}
+	return &Service{cfg: cfg}
 }
 
-// RequestPresignedUpload generates an authenticated upload target.
+// RequestPresignedUpload validates constraints and generates an authentic AWS SigV4 presigned PUT target.
 func (s *Service) RequestPresignedUpload(ctx context.Context, fileName, contentType string, sizeBytes int64, purpose Purpose, isAdmin bool) (*PresignResult, error) {
 	if strings.TrimSpace(fileName) == "" {
 		return nil, errors.New("file_name is required")
@@ -101,10 +127,14 @@ func (s *Service) RequestPresignedUpload(ctx context.Context, fileName, contentT
 
 	objectKey := fmt.Sprintf("%s/%s%s", folder, uuid.New().String(), ext)
 	expiresIn := 900 // 15 minutes
-	uploadURL := fmt.Sprintf("%s/uploads/%s?expires=%d&token=%s", s.baseURL, objectKey, time.Now().Add(15*time.Minute).Unix(), uuid.New().String()[:8])
+
+	presignedURL, err := s.signS3PutURL(objectKey, expiresIn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign presigned upload target: %w", err)
+	}
 
 	return &PresignResult{
-		UploadURL:        uploadURL,
+		UploadURL:        presignedURL,
 		ObjectKey:        objectKey,
 		ExpiresInSeconds: expiresIn,
 		Method:           "PUT",
@@ -113,4 +143,83 @@ func (s *Service) RequestPresignedUpload(ctx context.Context, fileName, contentT
 		},
 		MaxSizeBytes: MaxUploadSizeBytes,
 	}, nil
+}
+
+// signS3PutURL calculates standard AWS SigV4 presigned PUT target URL.
+func (s *Service) signS3PutURL(objectKey string, expiresInSeconds int) (string, error) {
+	parsedURL, err := url.Parse(s.cfg.Endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid storage endpoint URL: %w", err)
+	}
+
+	now := time.Now().UTC()
+	dateStamp := now.Format("20060102")
+	amzDate := now.Format("20060102T150405Z")
+
+	credentialScope := fmt.Sprintf("%s/%s/s3/aws4_request", dateStamp, s.cfg.Region)
+	credentialParam := fmt.Sprintf("%s/%s", s.cfg.AccessKey, credentialScope)
+
+	canonicalURI := fmt.Sprintf("/%s/%s", s.cfg.BucketName, strings.TrimPrefix(objectKey, "/"))
+
+	queryParams := url.Values{}
+	queryParams.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	queryParams.Set("X-Amz-Credential", credentialParam)
+	queryParams.Set("X-Amz-Date", amzDate)
+	queryParams.Set("X-Amz-Expires", fmt.Sprintf("%d", expiresInSeconds))
+	queryParams.Set("X-Amz-SignedHeaders", "host")
+
+	canonicalQueryString := queryParams.Encode()
+
+	host := parsedURL.Host
+	if host == "" {
+		host = "127.0.0.1:9000"
+	}
+
+	canonicalRequest := strings.Join([]string{
+		"PUT",
+		canonicalURI,
+		canonicalQueryString,
+		fmt.Sprintf("host:%s\n", host),
+		"host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+
+	reqHash := sha256Hex([]byte(canonicalRequest))
+
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		credentialScope,
+		reqHash,
+	}, "\n")
+
+	signingKey := getSignatureKey(s.cfg.SecretKey, dateStamp, s.cfg.Region, "s3")
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
+
+	finalURL := fmt.Sprintf("%s%s?%s&X-Amz-Signature=%s",
+		strings.TrimRight(s.cfg.Endpoint, "/"),
+		canonicalURI,
+		canonicalQueryString,
+		signature,
+	)
+
+	return finalURL, nil
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func hmacSHA256(key []byte, data []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func getSignatureKey(secretKey, dateStamp, regionName, serviceName string) []byte {
+	kDate := hmacSHA256([]byte("AWS4"+secretKey), []byte(dateStamp))
+	kRegion := hmacSHA256(kDate, []byte(regionName))
+	kService := hmacSHA256(kRegion, []byte(serviceName))
+	return hmacSHA256(kService, []byte("aws4_request"))
 }

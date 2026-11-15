@@ -326,6 +326,112 @@ func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) (
 	return items, nil
 }
 
+const listDonationsByUserIDWithCursor = `-- name: ListDonationsByUserIDWithCursor :many
+SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, cp.title AS project_title
+FROM donations d
+JOIN conservation_projects cp ON d.project_id = cp.id
+WHERE d.user_id = $1
+  AND ($3::timestamptz IS NULL OR d.created_at < $3::timestamptz)
+ORDER BY d.created_at DESC
+LIMIT $2
+`
+
+type ListDonationsByUserIDWithCursorParams struct {
+	UserID          uuid.UUID          `json:"user_id"`
+	Limit           int32              `json:"limit"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+}
+
+type ListDonationsByUserIDWithCursorRow struct {
+	ID                       uuid.UUID          `json:"id"`
+	IdempotencyKey           string             `json:"idempotency_key"`
+	UserID                   uuid.UUID          `json:"user_id"`
+	ProjectID                uuid.UUID          `json:"project_id"`
+	SubscriptionID           pgtype.UUID        `json:"subscription_id"`
+	SponsoredQuotaID         pgtype.UUID        `json:"sponsored_quota_id"`
+	CycleNumber              pgtype.Int4        `json:"cycle_number"`
+	DonationType             DonationType       `json:"donation_type"`
+	IsAnonymous              bool               `json:"is_anonymous"`
+	UnitQuantity             int32              `json:"unit_quantity"`
+	CurrencyCode             string             `json:"currency_code"`
+	GrossProjectValue        pgtype.Numeric     `json:"gross_project_value"`
+	MoneyAmountPaid          pgtype.Numeric     `json:"money_amount_paid"`
+	SettlementCurrencyCode   string             `json:"settlement_currency_code"`
+	SettlementAmount         pgtype.Numeric     `json:"settlement_amount"`
+	FxRateSnapshot           pgtype.Numeric     `json:"fx_rate_snapshot"`
+	GatewayFeeSettlement     pgtype.Numeric     `json:"gateway_fee_settlement"`
+	MoneyPaymentMethod       PaymentMethodType  `json:"money_payment_method"`
+	PaymentProvider          string             `json:"payment_provider"`
+	IsMixedPayment           bool               `json:"is_mixed_payment"`
+	BankCode                 pgtype.Text        `json:"bank_code"`
+	VaNumber                 pgtype.Text        `json:"va_number"`
+	QrisPayload              pgtype.Text        `json:"qris_payload"`
+	PointsUsed               int64              `json:"points_used"`
+	PointsRateSnapshot       pgtype.Numeric     `json:"points_rate_snapshot"`
+	PointsMonetaryEquivalent pgtype.Numeric     `json:"points_monetary_equivalent"`
+	IsPointsLocked           bool               `json:"is_points_locked"`
+	PaymentStatus            PaymentStatus      `json:"payment_status"`
+	ExternalGatewayRef       pgtype.Text        `json:"external_gateway_ref"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
+	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	ProjectTitle             string             `json:"project_title"`
+}
+
+func (q *Queries) ListDonationsByUserIDWithCursor(ctx context.Context, arg ListDonationsByUserIDWithCursorParams) ([]ListDonationsByUserIDWithCursorRow, error) {
+	rows, err := q.db.Query(ctx, listDonationsByUserIDWithCursor, arg.UserID, arg.Limit, arg.CursorCreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDonationsByUserIDWithCursorRow
+	for rows.Next() {
+		var i ListDonationsByUserIDWithCursorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IdempotencyKey,
+			&i.UserID,
+			&i.ProjectID,
+			&i.SubscriptionID,
+			&i.SponsoredQuotaID,
+			&i.CycleNumber,
+			&i.DonationType,
+			&i.IsAnonymous,
+			&i.UnitQuantity,
+			&i.CurrencyCode,
+			&i.GrossProjectValue,
+			&i.MoneyAmountPaid,
+			&i.SettlementCurrencyCode,
+			&i.SettlementAmount,
+			&i.FxRateSnapshot,
+			&i.GatewayFeeSettlement,
+			&i.MoneyPaymentMethod,
+			&i.PaymentProvider,
+			&i.IsMixedPayment,
+			&i.BankCode,
+			&i.VaNumber,
+			&i.QrisPayload,
+			&i.PointsUsed,
+			&i.PointsRateSnapshot,
+			&i.PointsMonetaryEquivalent,
+			&i.IsPointsLocked,
+			&i.PaymentStatus,
+			&i.ExternalGatewayRef,
+			&i.PaidAt,
+			&i.ExpiredAt,
+			&i.CreatedAt,
+			&i.ProjectTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredPendingDonations = `-- name: ListExpiredPendingDonations :many
 SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at FROM donations
 WHERE payment_status = 'pending' AND expired_at < NOW()

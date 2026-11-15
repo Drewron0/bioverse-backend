@@ -12,21 +12,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/b2b"
-	"github.com/Drewron01/bioverse-backend/internal/catalog"
-	"github.com/Drewron01/bioverse-backend/internal/conservation"
-	"github.com/Drewron01/bioverse-backend/internal/donation"
-	"github.com/Drewron01/bioverse-backend/internal/fieldops"
-	"github.com/Drewron01/bioverse-backend/internal/gamification"
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/email"
-	"github.com/Drewron01/bioverse-backend/internal/platform/middleware"
-	"github.com/Drewron01/bioverse-backend/internal/platform/notification"
-	"github.com/Drewron01/bioverse-backend/internal/platform/payment"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
-	"github.com/Drewron01/bioverse-backend/internal/upload"
+	"github.com/Drewron0/bioverse-backend/internal/b2b"
+	"github.com/Drewron0/bioverse-backend/internal/catalog"
+	"github.com/Drewron0/bioverse-backend/internal/conservation"
+	"github.com/Drewron0/bioverse-backend/internal/donation"
+	"github.com/Drewron0/bioverse-backend/internal/fieldops"
+	"github.com/Drewron0/bioverse-backend/internal/gamification"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/email"
+	"github.com/Drewron0/bioverse-backend/internal/platform/middleware"
+	"github.com/Drewron0/bioverse-backend/internal/platform/notification"
+	"github.com/Drewron0/bioverse-backend/internal/platform/payment"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/upload"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -158,43 +158,53 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 
 	if db != nil {
 		queries := store.New(db)
-		authMiddleware := identity.AuthMiddleware(cfg.Auth.JWTSecret)
+		userAuthMiddleware := identity.AuthMiddleware(cfg.Auth.JWTSecret)
+		adminAuthMiddleware := identity.AdminAuthMiddleware(cfg.Auth.JWTSecret)
 
-		identityService := identity.NewService(db, queries, cfg)
+		emailSender := email.NewResendClient(cfg.Email.ResendAPIKey, cfg.Email.FromEmail, log)
+		fcmDispatcher := notification.NewFCMDispatcher(cfg.Notification.FCMCredentialsPath, log)
+
+		identityService := identity.NewService(db, queries, cfg, emailSender, fcmDispatcher)
 		identityHandler := identity.NewHandler(identityService)
-		identityHandler.RegisterRoutes(r, authMiddleware)
+		identityHandler.RegisterRoutes(r, userAuthMiddleware, adminAuthMiddleware)
 
-		uploadService := upload.NewService("")
+		uploadService := upload.NewService(upload.Config{
+			Endpoint:   cfg.Storage.Endpoint,
+			AccessKey:  cfg.Storage.AccessKey,
+			SecretKey:  cfg.Storage.SecretKey,
+			BucketName: cfg.Storage.BucketName,
+			Region:     cfg.Storage.Region,
+			UseSSL:     cfg.Storage.UseSSL,
+		})
 		uploadHandler := upload.NewHandler(uploadService)
-		uploadHandler.RegisterRoutes(r, authMiddleware)
+		uploadHandler.RegisterRoutes(r, userAuthMiddleware, adminAuthMiddleware)
 
 		conservationService := conservation.NewService(db, queries)
 		conservationHandler := conservation.NewHandler(conservationService)
-		conservationHandler.RegisterRoutes(r, authMiddleware)
+		conservationHandler.RegisterRoutes(r, userAuthMiddleware)
 
 		catalogService := catalog.NewService(db, queries)
 		catalogHandler := catalog.NewHandler(catalogService)
-		catalogHandler.RegisterRoutes(r, authMiddleware)
+		catalogHandler.RegisterRoutes(r, userAuthMiddleware)
 
 		xenditGateway := payment.NewXenditClient(cfg.Payment.XenditSecretKey, log)
-		_ = email.NewResendClient(cfg.Email.ResendAPIKey, cfg.Email.FromEmail, log)
-		_ = notification.NewFCMDispatcher(cfg.Notification.FCMCredentialsPath, log)
 
 		donationService := donation.NewService(db, queries, conservationService, xenditGateway)
-		donationHandler := donation.NewHandler(donationService)
-		donationHandler.RegisterRoutes(r, authMiddleware)
+		isDev := cfg.App.Environment == "development"
+		donationHandler := donation.NewHandler(donationService, cfg.Payment.XenditWebhookToken, isDev)
+		donationHandler.RegisterRoutes(r, userAuthMiddleware)
 
 		gamificationService := gamification.NewService(db, queries, nil)
 		gamificationHandler := gamification.NewHandler(gamificationService)
-		gamificationHandler.RegisterRoutes(r, authMiddleware)
+		gamificationHandler.RegisterRoutes(r, userAuthMiddleware)
 
 		fieldopsService := fieldops.NewService(db, queries, cfg.Auth.AppEncryptionKey, cfg.Auth.HMACSecret)
 		fieldopsHandler := fieldops.NewHandler(fieldopsService)
-		fieldopsHandler.RegisterRoutes(r, authMiddleware)
+		fieldopsHandler.RegisterRoutes(r, adminAuthMiddleware)
 
 		b2bService := b2b.NewService(db, queries)
 		b2bHandler := b2b.NewHandler(b2bService)
-		b2bHandler.RegisterRoutes(r, authMiddleware)
+		b2bHandler.RegisterRoutes(r, adminAuthMiddleware)
 	}
 
 	return r

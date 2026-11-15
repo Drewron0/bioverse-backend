@@ -3,7 +3,7 @@ package crypto_test
 import (
 	"testing"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/crypto"
+	"github.com/Drewron0/bioverse-backend/internal/platform/crypto"
 )
 
 func TestAES256GCMEncryptionAndDecryption(t *testing.T) {

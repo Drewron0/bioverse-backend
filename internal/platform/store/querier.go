@@ -14,6 +14,7 @@ import (
 type Querier interface {
 	ClaimSponsoredQuota(ctx context.Context, id uuid.UUID) (SponsoredAdoptionQuotas, error)
 	ClearUserPrimaryPets(ctx context.Context, userID uuid.UUID) error
+	ConfirmAdminMFA(ctx context.Context, id uuid.UUID) error
 	CountActiveCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) (int64, error)
 	CreateAdminToken(ctx context.Context, arg CreateAdminTokenParams) (CreateAdminTokenRow, error)
 	CreateB2BContract(ctx context.Context, arg CreateB2BContractParams) (B2bContracts, error)
@@ -41,6 +42,7 @@ type Querier interface {
 	DecrementUserInventoryItem(ctx context.Context, arg DecrementUserInventoryItemParams) (UserDigitalInventories, error)
 	EquipVirtualPetProduct(ctx context.Context, arg EquipVirtualPetProductParams) (VirtualPets, error)
 	GetAdminTokenByHash(ctx context.Context, arg GetAdminTokenByHashParams) (GetAdminTokenByHashRow, error)
+	GetAppSetting(ctx context.Context, settingKey string) (AppSettings, error)
 	GetCompanyByID(ctx context.Context, id uuid.UUID) (Companies, error)
 	GetConservationProjectByID(ctx context.Context, id uuid.UUID) (GetConservationProjectByIDRow, error)
 	GetCoralFragmentByID(ctx context.Context, id uuid.UUID) (GetCoralFragmentByIDRow, error)
@@ -59,6 +61,7 @@ type Querier interface {
 	GetOpenSpiderFrameForZone(ctx context.Context, zoneID uuid.UUID) (GetOpenSpiderFrameForZoneRow, error)
 	GetOperatorPayoutByID(ctx context.Context, id uuid.UUID) (OperatorPayouts, error)
 	GetPlatformAdminByEmail(ctx context.Context, email string) (PlatformAdmins, error)
+	GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (PlatformAdmins, error)
 	GetPlatformImpactSummary(ctx context.Context) (GetPlatformImpactSummaryRow, error)
 	GetSponsoredAdoptionQuota(ctx context.Context, id uuid.UUID) (SponsoredAdoptionQuotas, error)
 	GetSubscriptionPlanByID(ctx context.Context, arg GetSubscriptionPlanByIDParams) (GetSubscriptionPlanByIDRow, error)
@@ -69,6 +72,7 @@ type Querier interface {
 	GetUserStreakByUserID(ctx context.Context, userID uuid.UUID) (UserStreaks, error)
 	GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHashParams) (UserTokens, error)
 	GetVirtualPetByID(ctx context.Context, arg GetVirtualPetByIDParams) (GetVirtualPetByIDRow, error)
+	GetWebhookEventByProviderAndExternalID(ctx context.Context, arg GetWebhookEventByProviderAndExternalIDParams) (WebhookEvents, error)
 	IncrementProjectFundedUnits(ctx context.Context, arg IncrementProjectFundedUnitsParams) (IncrementProjectFundedUnitsRow, error)
 	IncrementSpiderFrameFragmentsPlanted(ctx context.Context, arg IncrementSpiderFrameFragmentsPlantedParams) (IncrementSpiderFrameFragmentsPlantedRow, error)
 	ListActiveB2BPackages(ctx context.Context) ([]B2bPackages, error)
@@ -84,6 +88,7 @@ type Querier interface {
 	ListCoralFragmentsByUserID(ctx context.Context, adoptedByUserID pgtype.UUID) ([]ListCoralFragmentsByUserIDRow, error)
 	ListCoralMilestonesByFragmentID(ctx context.Context, coralFragmentID pgtype.UUID) ([]ListCoralMilestonesByFragmentIDRow, error)
 	ListDonationsByUserID(ctx context.Context, userID uuid.UUID) ([]ListDonationsByUserIDRow, error)
+	ListDonationsByUserIDWithCursor(ctx context.Context, arg ListDonationsByUserIDWithCursorParams) ([]ListDonationsByUserIDWithCursorRow, error)
 	ListESGAuditReportsByCompany(ctx context.Context, companyID uuid.UUID) ([]EsgAuditReports, error)
 	ListESGMetricsByCompany(ctx context.Context, arg ListESGMetricsByCompanyParams) ([]EsgBiodiversityMetrics, error)
 	ListExpiredPendingDonations(ctx context.Context, limit int32) ([]Donations, error)
@@ -93,6 +98,7 @@ type Querier interface {
 	ListNewsArticles(ctx context.Context, limit int32) ([]NewsArticles, error)
 	ListOperatorPayouts(ctx context.Context, operatorID uuid.UUID) ([]ListOperatorPayoutsRow, error)
 	ListOperatorWorkLogs(ctx context.Context, arg ListOperatorWorkLogsParams) ([]ListOperatorWorkLogsRow, error)
+	ListPendingMissionSubmissions(ctx context.Context, limit int32) ([]ListPendingMissionSubmissionsRow, error)
 	ListSubmissionsByUserID(ctx context.Context, arg ListSubmissionsByUserIDParams) ([]ListSubmissionsByUserIDRow, error)
 	ListUserInventory(ctx context.Context, userID uuid.UUID) ([]ListUserInventoryRow, error)
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID) ([]ListUserSubscriptionsRow, error)
@@ -101,19 +107,26 @@ type Querier interface {
 	MarkAdminTokenUsed(ctx context.Context, id uuid.UUID) error
 	MarkDonationExpired(ctx context.Context, id uuid.UUID) (Donations, error)
 	MarkUserTokenUsed(ctx context.Context, id uuid.UUID) error
+	RecordAdminLoginFailure(ctx context.Context, id uuid.UUID) (RecordAdminLoginFailureRow, error)
+	RecordAdminLoginSuccess(ctx context.Context, id uuid.UUID) error
+	RecordWebhookEvent(ctx context.Context, arg RecordWebhookEventParams) (WebhookEvents, error)
 	RevokeAdminToken(ctx context.Context, tokenHash string) error
 	RevokeAllUserTokensForUser(ctx context.Context, arg RevokeAllUserTokensForUserParams) error
 	RevokeUserToken(ctx context.Context, id uuid.UUID) error
 	SetPrimaryPet(ctx context.Context, arg SetPrimaryPetParams) (VirtualPets, error)
 	SpendUserPoints(ctx context.Context, arg SpendUserPointsParams) (SpendUserPointsRow, error)
 	UnlockUserPoints(ctx context.Context, arg UnlockUserPointsParams) (UnlockUserPointsRow, error)
+	UpdateAdminMFASecret(ctx context.Context, arg UpdateAdminMFASecretParams) error
 	UpdateDonationPaymentStatus(ctx context.Context, arg UpdateDonationPaymentStatusParams) (Donations, error)
+	UpdateMissionSubmissionStatus(ctx context.Context, arg UpdateMissionSubmissionStatusParams) (UserMissionSubmissions, error)
 	UpdateOperatorPayoutStatus(ctx context.Context, arg UpdateOperatorPayoutStatusParams) (OperatorPayouts, error)
 	UpdateSubscriptionStatus(ctx context.Context, arg UpdateSubscriptionStatusParams) (DonationSubscriptions, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error)
 	UpdateUserStreak(ctx context.Context, arg UpdateUserStreakParams) (UserStreaks, error)
 	UpdateVirtualPetHealthAndXP(ctx context.Context, arg UpdateVirtualPetHealthAndXPParams) (VirtualPets, error)
+	UpdateWebhookEventStatus(ctx context.Context, arg UpdateWebhookEventStatusParams) (WebhookEvents, error)
+	UpsertAppSetting(ctx context.Context, arg UpsertAppSettingParams) (AppSettings, error)
 	UpsertFCMDeviceToken(ctx context.Context, arg UpsertFCMDeviceTokenParams) error
 	UpsertUserInventoryItem(ctx context.Context, arg UpsertUserInventoryItemParams) (UserDigitalInventories, error)
 	VerifyUserEmail(ctx context.Context, id uuid.UUID) error

@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/crypto"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/crypto"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/email"
+	"github.com/Drewron0/bioverse-backend/internal/platform/notification"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -35,6 +37,10 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 	// ErrMfaRequired indicates admin requires TOTP MFA verification.
 	ErrMfaRequired = errors.New("mfa totp code required")
+	// ErrAccountLocked indicates the admin account is temporarily locked due to brute-force attempts.
+	ErrAccountLocked = errors.New("admin account is temporarily locked due to repeated failed logins")
+	// ErrInvalidTOTPCode indicates an invalid two-factor authentication code.
+	ErrInvalidTOTPCode = errors.New("invalid two-factor authentication code")
 )
 
 // RegisterInput represents the payload required to register a new user.
@@ -111,17 +117,21 @@ type UserSummary struct {
 
 // Service provides business logic for identity, authentication, and user accounts.
 type Service struct {
-	pool   *pgxpool.Pool
-	store  store.Querier
-	config *config.Config
+	pool         *pgxpool.Pool
+	store        store.Querier
+	config       *config.Config
+	emailSender  email.Sender
+	pushNotifier notification.Dispatcher
 }
 
 // NewService constructs a new identity service.
-func NewService(pool *pgxpool.Pool, q store.Querier, cfg *config.Config) *Service {
+func NewService(pool *pgxpool.Pool, q store.Querier, cfg *config.Config, emailSender email.Sender, pushNotifier notification.Dispatcher) *Service {
 	return &Service{
-		pool:   pool,
-		store:  q,
-		config: cfg,
+		pool:         pool,
+		store:        q,
+		config:       cfg,
+		emailSender:  emailSender,
+		pushNotifier: pushNotifier,
 	}
 }
 
@@ -230,6 +240,21 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*AuthResult, 
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
+	}
+
+	if s.emailSender != nil {
+		verifyToken, _ := crypto.GenerateRandomString(32)
+		vTokenHash := crypto.HashToken(verifyToken)
+		vTokenID, _ := uuid.NewV7()
+		_, _ = s.store.CreateUserToken(ctx, store.CreateUserTokenParams{
+			ID:        vTokenID,
+			UserID:    userID,
+			TokenType: store.TokenTypeEnumEmailVerification,
+			TokenHash: vTokenHash,
+			ExpiresAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(24 * time.Hour), Valid: true},
+		})
+		verifyURL := fmt.Sprintf("https://bioverse.id/verify-email?token=%s", verifyToken)
+		_ = s.emailSender.SendVerificationEmail(ctx, in.Email, in.FullName, verifyURL)
 	}
 
 	return &AuthResult{
@@ -575,7 +600,16 @@ func (s *Service) ForgotPassword(ctx context.Context, email string) error {
 		TokenHash: tokenHash,
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(1 * time.Hour), Valid: true},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	if s.emailSender != nil {
+		resetURL := fmt.Sprintf("https://bioverse.id/reset-password?token=%s", resetToken)
+		_ = s.emailSender.SendPasswordResetEmail(ctx, user.Email, resetURL)
+	}
+
+	return nil
 }
 
 // ResetPassword resets password using a valid password_reset token.
@@ -694,16 +728,25 @@ func (s *Service) RegisterFCMToken(ctx context.Context, userID uuid.UUID, fcmTok
 	tokenHash := crypto.HashToken(fcmToken)
 	tokenID, _ := uuid.NewV7()
 
-	return s.store.UpsertFCMDeviceToken(ctx, store.UpsertFCMDeviceTokenParams{
+	err := s.store.UpsertFCMDeviceToken(ctx, store.UpsertFCMDeviceTokenParams{
 		ID:             tokenID,
 		UserID:         userID,
 		TokenHash:      tokenHash,
 		FcmDeviceToken: pgtype.Text{String: fcmToken, Valid: true},
 		DeviceInfo:     pgtype.Text{String: deviceType, Valid: true},
 	})
+	if err != nil {
+		return err
+	}
+
+	if s.pushNotifier != nil {
+		_ = s.pushNotifier.SendPush(ctx, fcmToken, "Device Connected", "Your mobile device has been linked to BioVerse.", nil)
+	}
+
+	return nil
 }
 
-// AdminLogin authenticates platform back-office administrators.
+// AdminLogin authenticates platform back-office administrators with brute-force protection and real TOTP verification.
 func (s *Service) AdminLogin(ctx context.Context, email, password, totpCode string) (*AdminAuthResult, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	admin, err := s.store.GetPlatformAdminByEmail(ctx, email)
@@ -711,15 +754,40 @@ func (s *Service) AdminLogin(ctx context.Context, email, password, totpCode stri
 		return nil, ErrInvalidCredentials
 	}
 
-	if err := crypto.VerifyPassword(password, admin.PasswordHash); err != nil {
+	if !admin.IsActive {
 		return nil, ErrInvalidCredentials
 	}
 
-	if admin.MfaEnabled && totpCode == "" {
-		return nil, ErrMfaRequired
+	if admin.LockedUntil.Valid && time.Now().UTC().Before(admin.LockedUntil.Time) {
+		return nil, ErrAccountLocked
 	}
 
-	accessToken, err := crypto.GenerateAccessToken(admin.ID, admin.Email, s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
+	if err := crypto.VerifyPassword(password, admin.PasswordHash); err != nil {
+		_, _ = s.store.RecordAdminLoginFailure(ctx, admin.ID)
+		return nil, ErrInvalidCredentials
+	}
+
+	if admin.MfaEnabled {
+		if totpCode == "" {
+			return nil, ErrMfaRequired
+		}
+		if len(admin.MfaSecretEncrypted) == 0 {
+			return nil, fmt.Errorf("admin has MFA enabled but no secret on record")
+		}
+		secretBytes, err := crypto.Decrypt(admin.MfaSecretEncrypted, s.config.Auth.AppEncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt MFA secret: %w", err)
+		}
+		if !crypto.VerifyTOTPCode(string(secretBytes), totpCode, time.Now().UTC()) {
+			_, _ = s.store.RecordAdminLoginFailure(ctx, admin.ID)
+			return nil, ErrInvalidTOTPCode
+		}
+	}
+
+	// Login succeeded: reset failure counter and update last_login_at
+	_ = s.store.RecordAdminLoginSuccess(ctx, admin.ID)
+
+	accessToken, err := crypto.GenerateAdminAccessToken(admin.ID, admin.Email, string(admin.Role), s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign admin access token: %w", err)
 	}
@@ -771,7 +839,7 @@ func (s *Service) AdminRefresh(ctx context.Context, rawRefreshToken string) (*Ad
 
 	_ = s.store.MarkAdminTokenUsed(ctx, tokenRecord.ID)
 
-	accessToken, err := crypto.GenerateAccessToken(tokenRecord.AdminID, tokenRecord.Email, s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
+	accessToken, err := crypto.GenerateAdminAccessToken(tokenRecord.AdminID, tokenRecord.Email, string(tokenRecord.Role), s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign admin token: %w", err)
 	}
@@ -806,4 +874,68 @@ func (s *Service) AdminLogout(ctx context.Context, rawRefreshToken string) error
 	}
 	tokenHash := crypto.HashToken(rawRefreshToken)
 	return s.store.RevokeAdminToken(ctx, tokenHash)
+}
+
+// AdminMFASetupResult contains the generated TOTP configuration for enrollment.
+type AdminMFASetupResult struct {
+	Secret     string `json:"secret"`
+	QRCodeURI  string `json:"qr_code_uri"`
+	Account    string `json:"account"`
+}
+
+// AdminSetupMFA generates a new TOTP secret for an administrator and stores it encrypted.
+func (s *Service) AdminSetupMFA(ctx context.Context, adminID uuid.UUID) (*AdminMFASetupResult, error) {
+	admin, err := s.store.GetPlatformAdminByID(ctx, adminID)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	secret, err := crypto.GenerateTOTPSecret()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate TOTP secret: %w", err)
+	}
+
+	encryptedSecret, err := crypto.Encrypt([]byte(secret), s.config.Auth.AppEncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt TOTP secret: %w", err)
+	}
+
+	err = s.store.UpdateAdminMFASecret(ctx, store.UpdateAdminMFASecretParams{
+		ID:                 adminID,
+		MfaSecretEncrypted: encryptedSecret,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to save MFA secret: %w", err)
+	}
+
+	otpauthURI := crypto.GenerateTOTPURI(secret, admin.Email, "BioVerse")
+
+	return &AdminMFASetupResult{
+		Secret:    secret,
+		QRCodeURI: otpauthURI,
+		Account:   admin.Email,
+	}, nil
+}
+
+// AdminVerifyMFA confirms enrollment by validating the first TOTP code and activates MFA.
+func (s *Service) AdminVerifyMFA(ctx context.Context, adminID uuid.UUID, code string) error {
+	admin, err := s.store.GetPlatformAdminByID(ctx, adminID)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+
+	if len(admin.MfaSecretEncrypted) == 0 {
+		return errors.New("MFA has not been setup yet")
+	}
+
+	secretBytes, err := crypto.Decrypt(admin.MfaSecretEncrypted, s.config.Auth.AppEncryptionKey)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt MFA secret: %w", err)
+	}
+
+	if !crypto.VerifyTOTPCode(string(secretBytes), code, time.Now().UTC()) {
+		return ErrInvalidTOTPCode
+	}
+
+	return s.store.ConfirmAdminMFA(ctx, adminID)
 }

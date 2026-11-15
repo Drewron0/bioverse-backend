@@ -115,6 +115,24 @@ WHERE s.user_id = $1
 ORDER BY s.submitted_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: ListPendingMissionSubmissions :many
+SELECT s.*, m.cv_target_label, m.cv_min_confidence
+FROM user_mission_submissions s
+JOIN eco_missions m ON s.mission_id = m.id
+WHERE s.status = 'pending'
+ORDER BY s.submitted_at ASC
+LIMIT $1;
+
+-- name: UpdateMissionSubmissionStatus :one
+UPDATE user_mission_submissions
+SET status = $2,
+    cv_confidence_score = $3,
+    cv_model_version = $4,
+    rejection_reason = $5,
+    verified_at = $6
+WHERE id = $1
+RETURNING *;
+
 -- name: CreditUserPoints :one
 UPDATE users
 SET points_balance = points_balance + $2

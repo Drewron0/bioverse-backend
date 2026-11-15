@@ -131,3 +131,39 @@ WHERE token_hash = $1;
 UPDATE admin_tokens
 SET used_at = NOW()
 WHERE id = $1;
+
+-- name: GetPlatformAdminByID :one
+SELECT id, full_name, email, password_hash, role, mfa_enabled, mfa_secret_encrypted, 
+       mfa_verified_at, failed_login_count, locked_until, last_login_at, is_active, created_at
+FROM platform_admins
+WHERE id = $1 AND is_active = true
+LIMIT 1;
+
+-- name: RecordAdminLoginSuccess :exec
+UPDATE platform_admins
+SET failed_login_count = 0,
+    locked_until = NULL,
+    last_login_at = NOW()
+WHERE id = $1;
+
+-- name: RecordAdminLoginFailure :one
+UPDATE platform_admins
+SET failed_login_count = failed_login_count + 1,
+    locked_until = CASE 
+        WHEN failed_login_count + 1 >= 5 THEN NOW() + INTERVAL '15 minutes' 
+        ELSE locked_until 
+    END
+WHERE id = $1
+RETURNING failed_login_count, locked_until;
+
+-- name: UpdateAdminMFASecret :exec
+UPDATE platform_admins
+SET mfa_secret_encrypted = $2,
+    mfa_enabled = false
+WHERE id = $1;
+
+-- name: ConfirmAdminMFA :exec
+UPDATE platform_admins
+SET mfa_enabled = true,
+    mfa_verified_at = NOW()
+WHERE id = $1;

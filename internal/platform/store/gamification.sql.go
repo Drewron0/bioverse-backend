@@ -602,6 +602,77 @@ func (q *Queries) ListActivePetBoosts(ctx context.Context, petID uuid.UUID) ([]P
 	return items, nil
 }
 
+const listPendingMissionSubmissions = `-- name: ListPendingMissionSubmissions :many
+SELECT s.id, s.user_id, s.mission_id, s.pet_id, s.submission_date, s.proof_image_url, s.image_hash, s.status, s.cv_job_id, s.cv_model_version, s.cv_confidence_score, s.cv_raw_response, s.awarded_points, s.awarded_xp, s.rejection_reason, s.submitted_at, s.verified_at, m.cv_target_label, m.cv_min_confidence
+FROM user_mission_submissions s
+JOIN eco_missions m ON s.mission_id = m.id
+WHERE s.status = 'pending'
+ORDER BY s.submitted_at ASC
+LIMIT $1
+`
+
+type ListPendingMissionSubmissionsRow struct {
+	ID                uuid.UUID          `json:"id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	MissionID         uuid.UUID          `json:"mission_id"`
+	PetID             pgtype.UUID        `json:"pet_id"`
+	SubmissionDate    pgtype.Date        `json:"submission_date"`
+	ProofImageUrl     pgtype.Text        `json:"proof_image_url"`
+	ImageHash         pgtype.Text        `json:"image_hash"`
+	Status            SubmissionStatus   `json:"status"`
+	CvJobID           pgtype.Text        `json:"cv_job_id"`
+	CvModelVersion    pgtype.Text        `json:"cv_model_version"`
+	CvConfidenceScore pgtype.Numeric     `json:"cv_confidence_score"`
+	CvRawResponse     []byte             `json:"cv_raw_response"`
+	AwardedPoints     int64              `json:"awarded_points"`
+	AwardedXp         int64              `json:"awarded_xp"`
+	RejectionReason   pgtype.Text        `json:"rejection_reason"`
+	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+	CvTargetLabel     pgtype.Text        `json:"cv_target_label"`
+	CvMinConfidence   pgtype.Numeric     `json:"cv_min_confidence"`
+}
+
+func (q *Queries) ListPendingMissionSubmissions(ctx context.Context, limit int32) ([]ListPendingMissionSubmissionsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingMissionSubmissions, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingMissionSubmissionsRow
+	for rows.Next() {
+		var i ListPendingMissionSubmissionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.MissionID,
+			&i.PetID,
+			&i.SubmissionDate,
+			&i.ProofImageUrl,
+			&i.ImageHash,
+			&i.Status,
+			&i.CvJobID,
+			&i.CvModelVersion,
+			&i.CvConfidenceScore,
+			&i.CvRawResponse,
+			&i.AwardedPoints,
+			&i.AwardedXp,
+			&i.RejectionReason,
+			&i.SubmittedAt,
+			&i.VerifiedAt,
+			&i.CvTargetLabel,
+			&i.CvMinConfidence,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubmissionsByUserID = `-- name: ListSubmissionsByUserID :many
 SELECT s.id, s.user_id, s.mission_id, s.pet_id, s.submission_date, s.proof_image_url, s.image_hash, s.status, s.cv_job_id, s.cv_model_version, s.cv_confidence_score, s.cv_raw_response, s.awarded_points, s.awarded_xp, s.rejection_reason, s.submitted_at, s.verified_at, m.title AS mission_title, m.category AS mission_category
 FROM user_mission_submissions s
@@ -857,6 +928,58 @@ func (q *Queries) UnlockUserPoints(ctx context.Context, arg UnlockUserPointsPara
 	row := q.db.QueryRow(ctx, unlockUserPoints, arg.ID, arg.LockedPointsBalance)
 	var i UnlockUserPointsRow
 	err := row.Scan(&i.ID, &i.PointsBalance, &i.LockedPointsBalance)
+	return i, err
+}
+
+const updateMissionSubmissionStatus = `-- name: UpdateMissionSubmissionStatus :one
+UPDATE user_mission_submissions
+SET status = $2,
+    cv_confidence_score = $3,
+    cv_model_version = $4,
+    rejection_reason = $5,
+    verified_at = $6
+WHERE id = $1
+RETURNING id, user_id, mission_id, pet_id, submission_date, proof_image_url, image_hash, status, cv_job_id, cv_model_version, cv_confidence_score, cv_raw_response, awarded_points, awarded_xp, rejection_reason, submitted_at, verified_at
+`
+
+type UpdateMissionSubmissionStatusParams struct {
+	ID                uuid.UUID          `json:"id"`
+	Status            SubmissionStatus   `json:"status"`
+	CvConfidenceScore pgtype.Numeric     `json:"cv_confidence_score"`
+	CvModelVersion    pgtype.Text        `json:"cv_model_version"`
+	RejectionReason   pgtype.Text        `json:"rejection_reason"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+}
+
+func (q *Queries) UpdateMissionSubmissionStatus(ctx context.Context, arg UpdateMissionSubmissionStatusParams) (UserMissionSubmissions, error) {
+	row := q.db.QueryRow(ctx, updateMissionSubmissionStatus,
+		arg.ID,
+		arg.Status,
+		arg.CvConfidenceScore,
+		arg.CvModelVersion,
+		arg.RejectionReason,
+		arg.VerifiedAt,
+	)
+	var i UserMissionSubmissions
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.MissionID,
+		&i.PetID,
+		&i.SubmissionDate,
+		&i.ProofImageUrl,
+		&i.ImageHash,
+		&i.Status,
+		&i.CvJobID,
+		&i.CvModelVersion,
+		&i.CvConfidenceScore,
+		&i.CvRawResponse,
+		&i.AwardedPoints,
+		&i.AwardedXp,
+		&i.RejectionReason,
+		&i.SubmittedAt,
+		&i.VerifiedAt,
+	)
 	return i, err
 }
 

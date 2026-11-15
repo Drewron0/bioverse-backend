@@ -1544,6 +1544,56 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/admin/auth/mfa/setup:
+    post:
+      tags:
+        - Admin Auth
+      summary: Setup TOTP two-factor authentication
+      description: Generates a new TOTP secret and otpauth URI for authenticator app enrollment.
+      operationId: setupAdminMFA
+      security:
+        - AdminBearerAuth: []
+      responses:
+        '200':
+          description: MFA setup configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMFASetupResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/auth/mfa/verify:
+    post:
+      tags:
+        - Admin Auth
+      summary: Verify and enable TOTP two-factor authentication
+      description: Validates the first TOTP code from an authenticator app and activates MFA on the administrator account.
+      operationId: verifyAdminMFA
+      security:
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminMFAVerifyRequest'
+      responses:
+        '200':
+          description: MFA activated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/admin/uploads/presign:
     post:
       tags:
@@ -2569,6 +2619,35 @@ components:
           example: 900
         admin_role:
           $ref: '#/components/schemas/AdminRole'
+
+    AdminMFASetupResponse:
+      type: object
+      required:
+        - secret
+        - qr_code_uri
+        - account
+      properties:
+        secret:
+          type: string
+          example: JBSWY3DPEHPK3PXP
+        qr_code_uri:
+          type: string
+          example: otpauth://totp/BioVerse:admin@bioverse.id?secret=JBSWY3DPEHPK3PXP&issuer=BioVerse&digits=6&period=30
+        account:
+          type: string
+          format: email
+          example: admin@bioverse.id
+
+    AdminMFAVerifyRequest:
+      type: object
+      required:
+        - totp_code
+      properties:
+        totp_code:
+          type: string
+          minLength: 6
+          maxLength: 6
+          example: "123456"
 
     UserProfile:
       type: object

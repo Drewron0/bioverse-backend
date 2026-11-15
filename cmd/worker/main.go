@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
-	"github.com/Drewron01/bioverse-backend/internal/worker"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/worker"
 )
 
 func main() {
@@ -51,17 +51,25 @@ func main() {
 	jobRunner := worker.NewJobRunner(pool, queries, appLogger)
 
 	// Background ticker for expired checkouts cleanup (every 1 minute)
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
+	expiredTicker := time.NewTicker(1 * time.Minute)
+	defer expiredTicker.Stop()
+
+	// Background ticker for async mission verification (every 10 seconds)
+	missionTicker := time.NewTicker(10 * time.Second)
+	defer missionTicker.Stop()
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-expiredTicker.C:
 				jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				_, _ = jobRunner.ProcessExpiredDonations(jobCtx, 50)
+				jobCancel()
+			case <-missionTicker.C:
+				jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, _ = jobRunner.ProcessPendingMissionSubmissions(jobCtx, 25)
 				jobCancel()
 			}
 		}
@@ -70,7 +78,7 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
-	appLogger.Info("worker engine running, active schedules: expired checkouts (1m)")
+	appLogger.Info("worker engine running, active schedules: expired checkouts (1m), async mission verification (10s)")
 
 	<-shutdown
 	appLogger.Info("shutting down worker gracefully...")

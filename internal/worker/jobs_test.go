@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Drewron01/bioverse-backend/internal/identity"
-	"github.com/Drewron01/bioverse-backend/internal/platform/config"
-	"github.com/Drewron01/bioverse-backend/internal/platform/database"
-	"github.com/Drewron01/bioverse-backend/internal/platform/decimalutil"
-	"github.com/Drewron01/bioverse-backend/internal/platform/store"
-	"github.com/Drewron01/bioverse-backend/internal/worker"
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
+	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/Drewron0/bioverse-backend/internal/worker"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
@@ -33,7 +33,7 @@ func TestExpiredDonationsCleanupWorker(t *testing.T) {
 	defer pool.Close()
 
 	queries := store.New(pool)
-	identitySvc := identity.NewService(pool, queries, cfg)
+	identitySvc := identity.NewService(pool, queries, cfg, nil, nil)
 	runner := worker.NewJobRunner(pool, queries, nil)
 
 	// Fetch active project
