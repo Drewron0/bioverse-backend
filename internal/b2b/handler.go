@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
@@ -165,6 +167,9 @@ type createContractRequest struct {
 	PackageID       uuid.UUID       `json:"package_id"`
 	CreatedByMember uuid.UUID       `json:"created_by_member_id"`
 	ContractValue   decimal.Decimal `json:"contract_value"`
+	CurrencyCode    string          `json:"currency_code,omitempty"`
+	StartDate       string          `json:"start_date,omitempty"`
+	EndDate         string          `json:"end_date,omitempty"`
 	ProjectID       uuid.UUID       `json:"project_id"`
 	EmployeeQuota   int32           `json:"employee_quota"`
 }
@@ -184,14 +189,24 @@ func (h *Handler) handleCreateContract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now().UTC()
+	if s, err := time.Parse("2006-01-02", strings.TrimSpace(req.StartDate)); err == nil {
+		start = s
+	}
 	end := start.AddDate(1, 0, 0)
+	if e, err := time.Parse("2006-01-02", strings.TrimSpace(req.EndDate)); err == nil {
+		end = e
+	}
+	currency := "USD"
+	if strings.TrimSpace(req.CurrencyCode) != "" {
+		currency = strings.TrimSpace(req.CurrencyCode)
+	}
 
 	contract, quota, err := h.service.CreateContract(r.Context(), CreateContractInput{
 		CompanyID:       compID,
 		PackageID:       req.PackageID,
 		CreatedByMember: req.CreatedByMember,
 		ContractValue:   req.ContractValue,
-		CurrencyCode:    "USD",
+		CurrencyCode:    currency,
 		StartDate:       start,
 		EndDate:         end,
 	}, req.ProjectID, req.EmployeeQuota)
@@ -201,8 +216,11 @@ func (h *Handler) handleCreateContract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"contract": contract,
-		"quota":    quota,
+		"contract_id":    contract.ID,
+		"status":         contract.Status,
+		"contract_value": decimalutil.FromNumeric(contract.ContractValue).StringFixed(2),
+		"created_at":     contract.CreatedAt.Time.Format(time.RFC3339),
+		"quota":          quota,
 	})
 }
 

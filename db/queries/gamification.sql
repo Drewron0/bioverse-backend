@@ -150,10 +150,13 @@ SELECT
     COALESCE(BOOL_OR(d.is_anonymous), false)::boolean AS is_anonymous,
     ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(d.gross_project_value), 0) DESC, u.points_balance DESC, u.created_at ASC) AS rank_position
 FROM users u
-LEFT JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
+JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
     AND (sqlc.narg('period_start')::timestamptz IS NULL OR d.paid_at >= sqlc.narg('period_start')::timestamptz)
+JOIN conservation_projects cp ON d.project_id = cp.id
+    AND (sqlc.narg('category')::text IS NULL OR sqlc.narg('category')::text = 'all' OR cp.category::text = sqlc.narg('category')::text)
 WHERE u.deleted_at IS NULL
 GROUP BY u.id, u.full_name, u.avatar_url, u.points_balance, u.created_at
+HAVING COALESCE(SUM(d.gross_project_value), 0) > 0
 ORDER BY total_donations_usd DESC, u.points_balance DESC, u.created_at ASC
 LIMIT $1 OFFSET $2;
 

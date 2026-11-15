@@ -619,7 +619,7 @@ func (s *Service) GetUserStreak(ctx context.Context, userID uuid.UUID) (*store.U
 }
 
 // GetLeaderboard returns the global user ranking by points / donation USD.
-func (s *Service) GetLeaderboard(ctx context.Context, limit, offset int32, period string) ([]store.GetLeaderboardRow, error) {
+func (s *Service) GetLeaderboard(ctx context.Context, limit, offset int32, period, category string) ([]store.GetLeaderboardRow, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -640,10 +640,17 @@ func (s *Service) GetLeaderboard(ctx context.Context, limit, offset int32, perio
 		// all_time or unset
 	}
 
+	var catText pgtype.Text
+	catClean := strings.ToLower(strings.TrimSpace(category))
+	if catClean != "" && catClean != "all" {
+		catText = pgtype.Text{String: catClean, Valid: true}
+	}
+
 	return s.store.GetLeaderboard(ctx, store.GetLeaderboardParams{
 		Limit:       limit,
 		Offset:      offset,
 		PeriodStart: periodStart,
+		Category:    catText,
 	})
 }
 

@@ -112,13 +112,65 @@ func TestGamificationEndToEnd(t *testing.T) {
 		t.Errorf("expected points balance 50, got %d", user.PointsBalance)
 	}
 
-	// 7. Verify leaderboard contains the user
-	board, err := gamifySvc.GetLeaderboard(ctx, 10, 0, "all_time")
+	// 7. Verify leaderboard ranking and category filtering
+	var coralProjectID uuid.UUID
+	err = pool.QueryRow(ctx, "SELECT id FROM conservation_projects WHERE category = 'coral' LIMIT 1").Scan(&coralProjectID)
 	if err != nil {
-		t.Fatalf("failed to get leaderboard: %v", err)
+		coralProjectID, _ = uuid.NewV7()
+		var zoneID uuid.UUID
+		_ = pool.QueryRow(ctx, "SELECT id FROM conservation_zones LIMIT 1").Scan(&zoneID)
+		_, _ = pool.Exec(ctx, `
+			INSERT INTO conservation_projects (
+				id, zone_id, title, description, objectives, category, species_or_type_name,
+				image_url, price_per_unit_money, target_amount, target_units, donation_start_date
+			) VALUES ($1, $2, 'Coral Leaderboard Test', 'Desc', 'Obj', 'coral', 'Acropora', 'https://img.test', 25.00, 2500.00, 100, NOW())
+		`, coralProjectID, zoneID)
 	}
-	if len(board) == 0 {
-		t.Errorf("expected at least 1 user in leaderboard")
+
+	donationID, _ := uuid.NewV7()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO donations (
+			id, idempotency_key, user_id, project_id, cycle_number, donation_type,
+			unit_quantity, currency_code, gross_project_value, money_amount_paid,
+			settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement,
+			money_payment_method, payment_provider, is_mixed_payment, points_used,
+			is_points_locked, payment_status, expired_at, paid_at
+		) VALUES (
+			$1, $2, $3, $4, 1, 'coral_adoption',
+			1, 'USD', 25.00, 25.00,
+			'IDR', 400000.00, 16000.00, 0,
+			'qris', 'xendit', false, 0,
+			false, 'paid', NOW() + INTERVAL '1 day', NOW()
+		)
+	`, donationID, fmt.Sprintf("idem-leaderboard-%d", time.Now().UnixNano()), userID, coralProjectID)
+	if err != nil {
+		t.Fatalf("failed to insert paid test donation: %v", err)
+	}
+
+	boardCoral, err := gamifySvc.GetLeaderboard(ctx, 10, 0, "all_time", "coral")
+	if err != nil {
+		t.Fatalf("failed to get coral leaderboard: %v", err)
+	}
+	if len(boardCoral) == 0 {
+		t.Errorf("expected at least 1 user in coral leaderboard")
+	}
+
+	boardAll, err := gamifySvc.GetLeaderboard(ctx, 10, 0, "all_time", "all")
+	if err != nil {
+		t.Fatalf("failed to get all leaderboard: %v", err)
+	}
+	if len(boardAll) == 0 {
+		t.Errorf("expected at least 1 user in all leaderboard")
+	}
+
+	boardTree, err := gamifySvc.GetLeaderboard(ctx, 10, 0, "all_time", "tree")
+	if err != nil {
+		t.Fatalf("failed to get tree leaderboard: %v", err)
+	}
+	for _, b := range boardTree {
+		if b.ID == userID {
+			t.Errorf("did not expect user to appear in tree leaderboard")
+		}
 	}
 
 	// 8. Prevent duplicate submission on the same day

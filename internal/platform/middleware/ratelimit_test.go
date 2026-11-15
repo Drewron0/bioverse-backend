@@ -43,4 +43,16 @@ func TestRateLimiter(t *testing.T) {
 	if recOther.Code != http.StatusOK {
 		t.Fatalf("request from other IP expected status 200, got %d", recOther.Code)
 	}
+
+	// Spoofed headers from the exhausted IP should NOT bypass the rate limit
+	reqSpoofed := httptest.NewRequest("GET", "/test", nil)
+	reqSpoofed.RemoteAddr = "192.168.1.1:12345"
+	reqSpoofed.Header.Set("X-Forwarded-For", "203.0.113.195")
+	reqSpoofed.Header.Set("X-Real-IP", "198.51.100.1")
+	reqSpoofed.Header.Set("True-Client-IP", "198.51.100.2")
+	recSpoofed := httptest.NewRecorder()
+	handler.ServeHTTP(recSpoofed, reqSpoofed)
+	if recSpoofed.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected spoofed header request from exhausted IP to be blocked with 429, got %d", recSpoofed.Code)
+	}
 }

@@ -386,10 +386,13 @@ SELECT
     COALESCE(BOOL_OR(d.is_anonymous), false)::boolean AS is_anonymous,
     ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(d.gross_project_value), 0) DESC, u.points_balance DESC, u.created_at ASC) AS rank_position
 FROM users u
-LEFT JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
+JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
     AND ($3::timestamptz IS NULL OR d.paid_at >= $3::timestamptz)
+JOIN conservation_projects cp ON d.project_id = cp.id
+    AND ($4::text IS NULL OR $4::text = 'all' OR cp.category::text = $4::text)
 WHERE u.deleted_at IS NULL
 GROUP BY u.id, u.full_name, u.avatar_url, u.points_balance, u.created_at
+HAVING COALESCE(SUM(d.gross_project_value), 0) > 0
 ORDER BY total_donations_usd DESC, u.points_balance DESC, u.created_at ASC
 LIMIT $1 OFFSET $2
 `
@@ -398,6 +401,7 @@ type GetLeaderboardParams struct {
 	Limit       int32              `json:"limit"`
 	Offset      int32              `json:"offset"`
 	PeriodStart pgtype.Timestamptz `json:"period_start"`
+	Category    pgtype.Text        `json:"category"`
 }
 
 type GetLeaderboardRow struct {
@@ -412,7 +416,12 @@ type GetLeaderboardRow struct {
 }
 
 func (q *Queries) GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) ([]GetLeaderboardRow, error) {
-	rows, err := q.db.Query(ctx, getLeaderboard, arg.Limit, arg.Offset, arg.PeriodStart)
+	rows, err := q.db.Query(ctx, getLeaderboard,
+		arg.Limit,
+		arg.Offset,
+		arg.PeriodStart,
+		arg.Category,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -289,13 +289,32 @@ type CorporateDashboardDTO struct {
 // GetMemberByUserID looks up the company membership for an authenticated user.
 func (s *Service) GetMemberByUserID(ctx context.Context, userID uuid.UUID) (*store.CompanyMembers, error) {
 	mem, err := s.store.GetCompanyMemberByUserID(ctx, pgtype.UUID{Bytes: userID, Valid: true})
+	if err == nil {
+		return &mem, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	// Self-healing fallback: if member was invited by email before registration, link user_id now
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, errors.New("user is not an active member of any registered corporate company")
+	}
+
+	_ = s.store.LinkCompanyMemberUserByEmail(ctx, store.LinkCompanyMemberUserByEmailParams{
+		InvitedEmail: user.Email,
+		UserID:       pgtype.UUID{Bytes: userID, Valid: true},
+	})
+
+	linkedMem, err := s.store.GetCompanyMemberByUserID(ctx, pgtype.UUID{Bytes: userID, Valid: true})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("user is not an active member of any registered corporate company")
 		}
 		return nil, err
 	}
-	return &mem, nil
+	return &linkedMem, nil
 }
 
 // GetCorporateDashboard returns progress metrics for the corporate client.

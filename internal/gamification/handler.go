@@ -440,6 +440,7 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 	offsetStr := r.URL.Query().Get("offset")
 	cursor := r.URL.Query().Get("cursor")
 	period := r.URL.Query().Get("period")
+	category := r.URL.Query().Get("category")
 
 	limit := int32(50)
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -456,7 +457,7 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		offset = int32(c)
 	}
 
-	board, err := h.service.GetLeaderboard(r.Context(), limit, offset, period)
+	board, err := h.service.GetLeaderboard(r.Context(), limit, offset, period, category)
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return

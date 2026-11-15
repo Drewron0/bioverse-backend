@@ -28,7 +28,6 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/Drewron0/bioverse-backend/internal/upload"
 	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -133,7 +132,6 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(chimiddleware.RealIP)
 	r.Use(middleware.Logger(log))
 	r.Use(middleware.Recoverer(log))
 	r.Use(middleware.SecurityHeaders)
