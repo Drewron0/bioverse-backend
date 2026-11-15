@@ -27,17 +27,20 @@ func TestB2BAndESGEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
 
 	queries := store.New(pool)
 	b2bSvc := b2b.NewService(pool, queries)
 
-	// Fetch seeded project
-	projects, err := queries.ListConservationProjects(ctx)
-	if err != nil || len(projects) == 0 {
-		t.Fatalf("failed to get active projects: %v", err)
+	// Fetch immutable seeded project
+	seededProjectID := uuid.MustParse("0193297a-96e0-7988-9271-e0e649ce4201")
+	project, err := queries.GetConservationProjectByID(ctx, seededProjectID)
+	if err != nil {
+		t.Fatalf("failed to get seeded project: %v", err)
 	}
-	projectID := projects[0].ID
+	projectID := project.ID
 
 	uniqueSuffix := time.Now().UnixNano()
 

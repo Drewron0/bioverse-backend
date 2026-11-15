@@ -26,7 +26,9 @@ func TestCatalogAndInventoryEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
 
 	queries := store.New(pool)
 	catalogSvc := catalog.NewService(pool, queries)

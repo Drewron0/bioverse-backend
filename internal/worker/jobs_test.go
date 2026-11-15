@@ -30,18 +30,21 @@ func TestExpiredDonationsCleanupWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
 
 	queries := store.New(pool)
 	identitySvc := identity.NewService(pool, queries, cfg, nil, nil)
 	runner := worker.NewJobRunner(pool, queries, nil)
 
-	// Fetch active project
-	projects, err := queries.ListConservationProjects(ctx)
-	if err != nil || len(projects) == 0 {
-		t.Fatalf("failed to list projects: %v", err)
+	// Fetch active seeded project by immutable UUID
+	seededProjectID := uuid.MustParse("0193297a-96e0-7988-9271-e0e649ce4201")
+	project, err := queries.GetConservationProjectByID(ctx, seededProjectID)
+	if err != nil {
+		t.Fatalf("failed to get seeded project: %v", err)
 	}
-	projectID := projects[0].ID
+	projectID := project.ID
 
 	// 1. Create user and credit 200 points
 	uniqueSuffix := time.Now().UnixNano()
@@ -54,6 +57,14 @@ func TestExpiredDonationsCleanupWorker(t *testing.T) {
 		t.Fatalf("failed to register user: %v", err)
 	}
 	userID := authRes.User.ID
+
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM donations WHERE user_id = $1", userID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM user_tokens WHERE user_id = $1", userID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM users WHERE id = $1", userID)
+	})
 
 	_, err = queries.CreditUserPoints(ctx, store.CreditUserPointsParams{
 		ID:            userID,

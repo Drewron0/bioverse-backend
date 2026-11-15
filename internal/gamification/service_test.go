@@ -27,7 +27,9 @@ func TestGamificationEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
 
 	q := store.New(pool)
 	identitySvc := identity.NewService(pool, q, cfg, nil, nil)

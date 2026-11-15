@@ -10,6 +10,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/config"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
 
@@ -26,17 +27,21 @@ func TestFieldOpsEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect to db: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
 
 	queries := store.New(pool)
 	fieldSvc := fieldops.NewService(pool, queries, cfg.Auth.AppEncryptionKey, cfg.Auth.HMACSecret)
 
-	projects, err := queries.ListConservationProjects(ctx)
-	if err != nil || len(projects) == 0 {
-		t.Fatalf("failed to get active projects: %v", err)
+	// Fetch immutable seeded project
+	seededProjectID := uuid.MustParse("0193297a-96e0-7988-9271-e0e649ce4201")
+	project, err := queries.GetConservationProjectByID(ctx, seededProjectID)
+	if err != nil {
+		t.Fatalf("failed to get seeded project: %v", err)
 	}
-	projectID := projects[0].ID
-	zoneID := projects[0].ZoneID
+	projectID := project.ID
+	zoneID := project.ZoneID
 
 	uniqueSuffix := time.Now().UnixNano()
 	testNIK := fmt.Sprintf("5101%012d", uniqueSuffix%1000000000000)
