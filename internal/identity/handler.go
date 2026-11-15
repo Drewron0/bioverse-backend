@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/middleware"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,13 +24,15 @@ func NewHandler(svc *Service) *Handler {
 
 // RegisterRoutes registers identity routes on the provided chi router.
 func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMiddleware func(http.Handler) http.Handler) {
+	authLimiter := middleware.RateLimit(30, time.Minute)
+
 	r.Route("/v1/app/auth", func(authRouter chi.Router) {
-		authRouter.Post("/register", h.handleRegister)
-		authRouter.Post("/login", h.handleLogin)
+		authRouter.With(authLimiter).Post("/register", h.handleRegister)
+		authRouter.With(authLimiter).Post("/login", h.handleLogin)
 		authRouter.Post("/google", h.handleGoogleLogin)
 		authRouter.Post("/refresh", h.handleRefresh)
-		authRouter.Post("/forgot-password", h.handleForgotPassword)
-		authRouter.Post("/reset-password", h.handleResetPassword)
+		authRouter.With(authLimiter).Post("/forgot-password", h.handleForgotPassword)
+		authRouter.With(authLimiter).Post("/reset-password", h.handleResetPassword)
 		authRouter.Post("/verify-email", h.handleVerifyEmail)
 
 		authRouter.Group(func(protected chi.Router) {
@@ -46,7 +49,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMidd
 	})
 
 	r.Route("/v1/admin/auth", func(adminAuth chi.Router) {
-		adminAuth.Post("/login", h.handleAdminLogin)
+		adminAuth.With(authLimiter).Post("/login", h.handleAdminLogin)
 		adminAuth.Post("/refresh", h.handleAdminRefresh)
 
 		adminAuth.Group(func(protected chi.Router) {

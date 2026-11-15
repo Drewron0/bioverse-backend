@@ -10,6 +10,31 @@ jobs:
   test-and-lint:
     name: Go Test & Vet
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bioverse
+          POSTGRES_PASSWORD: bioverse_test_password
+          POSTGRES_DB: bioverse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://bioverse:bioverse_test_password@localhost:5432/bioverse_test?sslmode=disable
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: bioverse
+      DB_PASSWORD: bioverse_test_password
+      DB_NAME: bioverse_test
+      DB_SSLMODE: disable
+      APP_ENV: test
+      JWT_SECRET: supersecretjwtkeyforciintegrationtests12345
+      ADMIN_JWT_SECRET: supersecretadminjwtkeyforciintegrationtests12345
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,8 +51,13 @@ jobs:
       - name: Run Go Vet
         run: go vet ./...
 
-      - name: Run Unit Tests
-        run: go test -v -count=1 ./...
+      - name: Install Goose & Run Migrations
+        run: |
+          go install github.com/pressly/goose/v3/cmd/goose@latest
+          goose -dir db/migrations postgres "$DATABASE_URL" up
+
+      - name: Run Tests with Race Detector
+        run: go test -v -race -count=1 ./...
 
   openapi-lint:
     name: OpenAPI Contract Validation

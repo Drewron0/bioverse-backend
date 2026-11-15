@@ -54,6 +54,10 @@ func main() {
 	expiredTicker := time.NewTicker(1 * time.Minute)
 	defer expiredTicker.Stop()
 
+	// Background ticker for subscription billing checks (every 1 hour)
+	subscriptionTicker := time.NewTicker(1 * time.Hour)
+	defer subscriptionTicker.Stop()
+
 	go func() {
 		for {
 			select {
@@ -63,6 +67,10 @@ func main() {
 				jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				_, _ = jobRunner.ProcessExpiredDonations(jobCtx, 50)
 				jobCancel()
+			case <-subscriptionTicker.C:
+				jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, _ = jobRunner.ProcessDueSubscriptions(jobCtx, 50)
+				jobCancel()
 			}
 		}
 	}()
@@ -70,7 +78,7 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
-	appLogger.Info("worker engine running, active schedules: expired checkouts (1m)")
+	appLogger.Info("worker engine running, active schedules: expired checkouts (1m), subscription billing (1h)")
 
 	<-shutdown
 	appLogger.Info("shutting down worker gracefully...")

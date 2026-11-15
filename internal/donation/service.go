@@ -2,6 +2,8 @@ package donation
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -32,6 +34,10 @@ var (
 	ErrIdempotencyKeyReused = errors.New("idempotency key reused with different parameters")
 	// ErrAmountMismatch indicates payment amount reported by gateway doesn't match donation.
 	ErrAmountMismatch = errors.New("settlement amount mismatch between webhook and donation record")
+	// ErrVirtualPetNotFound indicates specified target pet was not found or does not belong to user.
+	ErrVirtualPetNotFound = errors.New("target pet not found or does not belong to user")
+	// ErrNoActiveVirtualPet indicates bio-shield addon requires at least one active virtual pet.
+	ErrNoActiveVirtualPet = errors.New("no active virtual pet found to apply bio-shield boost")
 )
 
 // CheckoutInput represents input payload for creating a donation.
@@ -121,6 +127,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			CurrencyCode:       existingDonation.CurrencyCode,
 			SettlementAmount:   decimalutil.FromNumeric(existingDonation.SettlementAmount),
 			SettlementCurrency: existingDonation.SettlementCurrencyCode,
+			FxRateSnapshot:     decimalutil.FromNumeric(existingDonation.FxRateSnapshot),
 			PointsUsed:         existingDonation.PointsUsed,
 			PointsDiscount:     decimalutil.FromNumeric(existingDonation.PointsMonetaryEquivalent),
 			PaymentMethod:      existingDonation.MoneyPaymentMethod,
@@ -144,6 +151,8 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	var projectZoneID uuid.UUID
 	var projectSpecies string
 
+	bioShieldPrice := s.getBioShieldPrice(ctx)
+
 	if donationType == store.DonationTypeBioShieldAddon {
 		activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
 		if err != nil {
@@ -152,7 +161,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		if activeCoralsCount <= 0 {
 			return nil, ErrCoralFirstGatingFailed
 		}
-		grossValue = decimal.NewFromFloat(1.80).Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
+		grossValue = bioShieldPrice.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
 
 		if in.ProjectID != nil {
 			projectID = *in.ProjectID
@@ -200,14 +209,35 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		coralPricePerUnit := decimalutil.FromNumeric(project.PricePerUnitMoney)
 		coralTotal := coralPricePerUnit.Mul(decimal.NewFromInt(int64(in.UnitQuantity)))
 
-		bioShieldPrice := decimal.Zero
+		addedBioShield := decimal.Zero
 		if in.IncludeBioShield {
-			bioShieldPrice = decimal.NewFromFloat(1.80)
+			addedBioShield = bioShieldPrice
 		}
-		grossValue = coralTotal.Add(bioShieldPrice)
+		grossValue = coralTotal.Add(addedBioShield)
 	}
 
-	pointsRate := decimal.NewFromFloat(0.01) // 100 points = $1.00 USD
+	// Validate target pet if bio-shield boost is involved
+	if in.TargetPetID != nil {
+		_, err := s.store.GetVirtualPetByID(ctx, store.GetVirtualPetByIDParams{
+			ID:     *in.TargetPetID,
+			UserID: in.UserID,
+		})
+		if err != nil {
+			return nil, ErrVirtualPetNotFound
+		}
+	} else if donationType == store.DonationTypeBioShieldAddon {
+		userPets, err := s.store.ListVirtualPetsByUserID(ctx, in.UserID)
+		if err != nil || len(userPets) == 0 {
+			return nil, ErrNoActiveVirtualPet
+		}
+		in.TargetPetID = &userPets[0].ID
+	} else if in.IncludeBioShield {
+		if userPets, err := s.store.ListVirtualPetsByUserID(ctx, in.UserID); err == nil && len(userPets) > 0 {
+			in.TargetPetID = &userPets[0].ID
+		}
+	}
+
+	pointsRate := s.getPointsRate(ctx)
 	pointsDiscount := decimal.Zero
 	if in.PointsToUse > 0 {
 		pointsDiscount = decimal.NewFromInt(in.PointsToUse).Mul(pointsRate)
@@ -221,7 +251,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		moneyAmountPaid = decimal.Zero
 	}
 
-	exchangeRate := decimal.NewFromInt(16000)
+	exchangeRate := s.getUSDToIDRExchangeRate(ctx)
 	settlementAmount := moneyAmountPaid.Mul(exchangeRate).Round(0)
 
 	donationID, _ := uuid.NewV7()
@@ -480,6 +510,11 @@ func (s *Service) ProcessPaidDonation(ctx context.Context, donationID uuid.UUID,
 		petID := uuid.UUID(donation.TargetPetID.Bytes)
 		effectivePetID = &petID
 	}
+	if effectivePetID == nil && (donation.IncludeBioShield || donation.DonationType == store.DonationTypeBioShieldAddon) {
+		if pets, err := s.store.ListVirtualPetsByUserID(ctx, donation.UserID); err == nil && len(pets) > 0 {
+			effectivePetID = &pets[0].ID
+		}
+	}
 	effectiveNickname := coralNickname
 	if effectiveNickname == "" && donation.CoralNickname.Valid {
 		effectiveNickname = donation.CoralNickname.String
@@ -648,12 +683,19 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			Payload:         rawPayload,
 			Status:          store.WebhookProcessStatusPending,
 		})
+
+		isDuplicate := false
 		if err != nil {
-			return fmt.Errorf("failed to record webhook event: %w", err)
+			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+				isDuplicate = true
+			} else {
+				return fmt.Errorf("failed to record webhook event: %w", err)
+			}
+		} else if createdEvent.ID == uuid.Nil {
+			isDuplicate = true
 		}
 
-		// If no row was inserted, event with this (provider, external_event_id) already exists!
-		if createdEvent.ID == uuid.Nil {
+		if isDuplicate {
 			existing, err := txStore.GetWebhookEventByProviderAndExternalID(ctx, store.GetWebhookEventByProviderAndExternalIDParams{
 				Provider:        "xendit",
 				ExternalEventID: externalEventID,
@@ -661,8 +703,8 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			if err != nil {
 				return fmt.Errorf("failed to lookup existing webhook event: %w", err)
 			}
-			if existing.Status == store.WebhookProcessStatusProcessed {
-				// Already processed successfully: idempotent return
+			if existing.Status == store.WebhookProcessStatusProcessed || existing.Status == store.WebhookProcessStatusIgnored {
+				// Already processed or ignored successfully: idempotent return
 				return nil
 			}
 		}
@@ -776,18 +818,30 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			}
 		}
 
-		if (donation.IncludeBioShield || donation.DonationType == store.DonationTypeBioShieldAddon) && donation.TargetPetID.Valid {
-			boostID, _ := uuid.NewV7()
-			_, err = txStore.CreatePetBoost(ctx, store.CreatePetBoostParams{
-				ID:           boostID,
-				UserID:       donation.UserID,
-				PetID:        donation.TargetPetID.Bytes,
-				DonationID:   pgtype.UUID{Bytes: donationID, Valid: true},
-				BoostType:    store.PetBoostTypeBioShieldXp,
-				XpMultiplier: decimalutil.ToNumeric(decimal.NewFromFloat(1.25)),
-			})
-			if err != nil {
-				return fmt.Errorf("failed to apply bio-shield boost to pet: %w", err)
+		if donation.IncludeBioShield || donation.DonationType == store.DonationTypeBioShieldAddon {
+			var petID *uuid.UUID
+			if donation.TargetPetID.Valid {
+				p := uuid.UUID(donation.TargetPetID.Bytes)
+				petID = &p
+			} else {
+				if userPets, err := txStore.ListVirtualPetsByUserID(ctx, donation.UserID); err == nil && len(userPets) > 0 {
+					petID = &userPets[0].ID
+				}
+			}
+
+			if petID != nil {
+				boostID, _ := uuid.NewV7()
+				_, err = txStore.CreatePetBoost(ctx, store.CreatePetBoostParams{
+					ID:           boostID,
+					UserID:       donation.UserID,
+					PetID:        *petID,
+					DonationID:   pgtype.UUID{Bytes: donationID, Valid: true},
+					BoostType:    store.PetBoostTypeBioShieldXp,
+					XpMultiplier: decimalutil.ToNumeric(decimal.NewFromFloat(1.25)),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to apply bio-shield boost to pet: %w", err)
+				}
 			}
 		}
 
@@ -815,3 +869,59 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 		return nil
 	})
 }
+
+func (s *Service) getBioShieldPrice(ctx context.Context) decimal.Decimal {
+	price := decimal.NewFromFloat(1.80)
+	setting, err := s.store.GetAppSetting(ctx, "bio_shield_addon_price_usd")
+	if err == nil {
+		var rawStr string
+		if err := json.Unmarshal(setting.SettingValue, &rawStr); err == nil {
+			if parsed, err := decimal.NewFromString(rawStr); err == nil && parsed.IsPositive() {
+				return parsed
+			}
+		} else {
+			var num float64
+			if err := json.Unmarshal(setting.SettingValue, &num); err == nil && num > 0 {
+				return decimal.NewFromFloat(num)
+			}
+		}
+	}
+	return price
+}
+
+func (s *Service) getPointsRate(ctx context.Context) decimal.Decimal {
+	rate := decimal.NewFromFloat(0.01) // 100 points = $1.00 USD
+	setting, err := s.store.GetAppSetting(ctx, "points_per_usd")
+	if err == nil {
+		var rawStr string
+		var pointsPerUSD decimal.Decimal
+		if err := json.Unmarshal(setting.SettingValue, &rawStr); err == nil {
+			pointsPerUSD, _ = decimal.NewFromString(rawStr)
+		} else {
+			var num float64
+			if err := json.Unmarshal(setting.SettingValue, &num); err == nil && num > 0 {
+				pointsPerUSD = decimal.NewFromFloat(num)
+			}
+		}
+		if pointsPerUSD.IsPositive() {
+			return decimal.NewFromInt(1).Div(pointsPerUSD)
+		}
+	}
+	return rate
+}
+
+func (s *Service) getUSDToIDRExchangeRate(ctx context.Context) decimal.Decimal {
+	rate := decimal.NewFromInt(16000)
+	record, err := s.store.GetLatestExchangeRate(ctx, store.GetLatestExchangeRateParams{
+		BaseCode:  "USD",
+		QuoteCode: "IDR",
+	})
+	if err == nil {
+		rateDec := decimalutil.FromNumeric(record.Rate)
+		if rateDec.IsPositive() {
+			return rateDec
+		}
+	}
+	return rate
+}
+

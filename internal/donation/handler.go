@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/middleware"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -36,9 +38,11 @@ func NewHandler(svc *Service, webhookToken string, allowSimulatePaid bool) *Hand
 
 // RegisterRoutes registers donation routes on the router.
 func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+	checkoutLimiter := middleware.RateLimit(30, time.Minute)
+
 	r.Route("/v1/app/donations", func(dr chi.Router) {
 		dr.Use(authMiddleware)
-		dr.Post("/checkout", h.handleCheckout)
+		dr.With(checkoutLimiter).Post("/checkout", h.handleCheckout)
 		dr.Get("/{id}", h.handleGetDonation)
 		dr.Get("/", h.handleListHistory)
 		dr.Get("/history", h.handleListHistory)
@@ -237,6 +241,140 @@ func (h *Handler) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+type donationPaymentDetailsDTO struct {
+	PaymentURL   *string `json:"payment_url"`
+	QRCodeString *string `json:"qr_code_string"`
+	VANumber     *string `json:"va_number"`
+	BankCode     *string `json:"bank_code"`
+}
+
+type donationDetailDTO struct {
+	ID                     string                     `json:"id"`
+	DonationType           string                     `json:"donation_type"`
+	Status                 string                     `json:"status"`
+	GrossAmount            string                     `json:"gross_amount"`
+	NetPayableAmount       string                     `json:"net_payable_amount"`
+	CurrencyCode           string                     `json:"currency_code"`
+	SettlementCurrencyCode string                     `json:"settlement_currency_code"`
+	SettlementAmount       string                     `json:"settlement_amount"`
+	FxRateSnapshot         string                     `json:"fx_rate_snapshot"`
+	PointsBurned           int64                      `json:"points_burned"`
+	PaymentMethodType      string                     `json:"payment_method_type"`
+	IsAnonymous            bool                       `json:"is_anonymous"`
+	PaymentDetails         *donationPaymentDetailsDTO `json:"payment_details,omitempty"`
+	PaidAt                 *string                    `json:"paid_at"`
+	ExpiredAt              *string                    `json:"expired_at"`
+	CreatedAt              string                     `json:"created_at"`
+}
+
+func mapDonationToDetail(d *store.Donations) donationDetailDTO {
+	var paidAt *string
+	if d.PaidAt.Valid {
+		f := d.PaidAt.Time.UTC().Format(time.RFC3339)
+		paidAt = &f
+	}
+	var expiredAt *string
+	if d.ExpiredAt.Valid {
+		f := d.ExpiredAt.Time.UTC().Format(time.RFC3339)
+		expiredAt = &f
+	}
+
+	var paymentURL *string
+	if d.PaymentUrl.Valid && d.PaymentUrl.String != "" {
+		paymentURL = &d.PaymentUrl.String
+	}
+	var qrCodeString *string
+	if d.QrisPayload.Valid && d.QrisPayload.String != "" {
+		qrCodeString = &d.QrisPayload.String
+	}
+	var vaNumber *string
+	if d.VaNumber.Valid && d.VaNumber.String != "" {
+		vaNumber = &d.VaNumber.String
+	}
+	var bankCode *string
+	if d.BankCode.Valid && d.BankCode.String != "" {
+		bankCode = &d.BankCode.String
+	}
+
+	return donationDetailDTO{
+		ID:                     d.ID.String(),
+		DonationType:           string(d.DonationType),
+		Status:                 string(d.PaymentStatus),
+		GrossAmount:            decimalutil.FromNumeric(d.GrossProjectValue).StringFixed(2),
+		NetPayableAmount:       decimalutil.FromNumeric(d.MoneyAmountPaid).StringFixed(2),
+		CurrencyCode:           d.CurrencyCode,
+		SettlementCurrencyCode: d.SettlementCurrencyCode,
+		SettlementAmount:       decimalutil.FromNumeric(d.SettlementAmount).StringFixed(2),
+		FxRateSnapshot:         decimalutil.FromNumeric(d.FxRateSnapshot).StringFixed(6),
+		PointsBurned:           d.PointsUsed,
+		PaymentMethodType:      string(d.MoneyPaymentMethod),
+		IsAnonymous:            d.IsAnonymous,
+		PaymentDetails: &donationPaymentDetailsDTO{
+			PaymentURL:   paymentURL,
+			QRCodeString: qrCodeString,
+			VANumber:     vaNumber,
+			BankCode:     bankCode,
+		},
+		PaidAt:    paidAt,
+		ExpiredAt: expiredAt,
+		CreatedAt: d.CreatedAt.Time.UTC().Format(time.RFC3339),
+	}
+}
+
+func mapCursorRowToDetail(d *store.ListDonationsByUserIDWithCursorRow) donationDetailDTO {
+	var paidAt *string
+	if d.PaidAt.Valid {
+		f := d.PaidAt.Time.UTC().Format(time.RFC3339)
+		paidAt = &f
+	}
+	var expiredAt *string
+	if d.ExpiredAt.Valid {
+		f := d.ExpiredAt.Time.UTC().Format(time.RFC3339)
+		expiredAt = &f
+	}
+
+	var paymentURL *string
+	if d.PaymentUrl.Valid && d.PaymentUrl.String != "" {
+		paymentURL = &d.PaymentUrl.String
+	}
+	var qrCodeString *string
+	if d.QrisPayload.Valid && d.QrisPayload.String != "" {
+		qrCodeString = &d.QrisPayload.String
+	}
+	var vaNumber *string
+	if d.VaNumber.Valid && d.VaNumber.String != "" {
+		vaNumber = &d.VaNumber.String
+	}
+	var bankCode *string
+	if d.BankCode.Valid && d.BankCode.String != "" {
+		bankCode = &d.BankCode.String
+	}
+
+	return donationDetailDTO{
+		ID:                     d.ID.String(),
+		DonationType:           string(d.DonationType),
+		Status:                 string(d.PaymentStatus),
+		GrossAmount:            decimalutil.FromNumeric(d.GrossProjectValue).StringFixed(2),
+		NetPayableAmount:       decimalutil.FromNumeric(d.MoneyAmountPaid).StringFixed(2),
+		CurrencyCode:           d.CurrencyCode,
+		SettlementCurrencyCode: d.SettlementCurrencyCode,
+		SettlementAmount:       decimalutil.FromNumeric(d.SettlementAmount).StringFixed(2),
+		FxRateSnapshot:         decimalutil.FromNumeric(d.FxRateSnapshot).StringFixed(6),
+		PointsBurned:           d.PointsUsed,
+		PaymentMethodType:      string(d.MoneyPaymentMethod),
+		IsAnonymous:            d.IsAnonymous,
+		PaymentDetails: &donationPaymentDetailsDTO{
+			PaymentURL:   paymentURL,
+			QRCodeString: qrCodeString,
+			VANumber:     vaNumber,
+			BankCode:     bankCode,
+		},
+		PaidAt:    paidAt,
+		ExpiredAt: expiredAt,
+		CreatedAt: d.CreatedAt.Time.UTC().Format(time.RFC3339),
+	}
+}
+
 func (h *Handler) handleGetDonation(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	donationID, err := uuid.Parse(idStr)
@@ -257,7 +395,7 @@ func (h *Handler) handleGetDonation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(donation)
+	_ = json.NewEncoder(w).Encode(mapDonationToDetail(donation))
 }
 
 func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
@@ -293,10 +431,15 @@ func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	respItems := make([]donationDetailDTO, 0, len(items))
+	for i := range items {
+		respItems = append(respItems, mapCursorRowToDetail(&items[i]))
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"items":       items,
+		"items":       respItems,
 		"next_cursor": nextCursor,
 	})
 }

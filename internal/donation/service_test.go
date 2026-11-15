@@ -287,4 +287,32 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	if err != ErrIdempotencyKeyReused {
 		t.Errorf("expected ErrIdempotencyKeyReused, got %v", err)
 	}
+
+	// 12. Webhook replay idempotency test: replaying identical webhook event must succeed idempotently without error
+	pendingKey := uuid.New().String()
+	pendingRes, err := donSvc.Checkout(ctx, CheckoutInput{
+		IdempotencyKey: pendingKey,
+		UserID:         userID,
+		ProjectID:      &testProjectID,
+		UnitQuantity:   1,
+		PaymentMethod:  store.PaymentMethodTypeQris,
+	})
+	if err != nil {
+		t.Fatalf("checkout pending donation failed: %v", err)
+	}
+
+	replayWebhookEventID := "evt_double_" + uuid.New().String()
+	replayWebhookExtID := "donation_" + pendingRes.DonationID.String()
+
+	// Initial webhook delivery
+	err = donSvc.ProcessXenditInvoiceWebhook(ctx, replayWebhookEventID, replayWebhookExtID, "PAID", pendingRes.SettlementAmount, []byte(`{"status":"PAID"}`))
+	if err != nil {
+		t.Fatalf("initial webhook delivery failed: %v", err)
+	}
+
+	// Replay delivery of the EXACT same event (triggers ON CONFLICT DO NOTHING)
+	err = donSvc.ProcessXenditInvoiceWebhook(ctx, replayWebhookEventID, replayWebhookExtID, "PAID", pendingRes.SettlementAmount, []byte(`{"status":"PAID"}`))
+	if err != nil {
+		t.Fatalf("replaying identical webhook delivery failed (expected idempotent success): %v", err)
+	}
 }

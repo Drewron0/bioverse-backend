@@ -10,6 +10,7 @@ import (
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
+	"github.com/Drewron0/bioverse-backend/internal/platform/middleware"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -28,6 +29,8 @@ func NewHandler(svc *Service) *Handler {
 
 // RegisterRoutes mounts all gamification endpoints on the router.
 func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler) http.Handler) {
+	submissionLimiter := middleware.RateLimit(30, time.Minute)
+
 	r.Group(func(protected chi.Router) {
 		protected.Use(authMiddleware)
 
@@ -40,7 +43,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 
 		// Eco-Missions
 		protected.Get("/v1/app/missions", h.listMissions)
-		protected.Post("/v1/app/missions/{id}/submit", h.submitMission)
+		protected.With(submissionLimiter).Post("/v1/app/missions/{id}/submit", h.submitMission)
 		protected.Get("/v1/app/mission-submissions/{id}", h.getMissionSubmission)
 
 		// Streaks & Leaderboard
