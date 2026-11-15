@@ -32,7 +32,7 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	queries := store.New(pool)
 	identitySvc := identity.NewService(pool, queries, cfg, nil, nil)
 	consSvc := conservation.NewService(pool, queries)
-	donSvc := NewService(pool, queries, consSvc, nil)
+	donSvc := NewService(pool, queries, consSvc, nil, nil, nil)
 
 	// 1. Create a fresh test user
 	uniqueSuffix := time.Now().UnixNano()

@@ -15,6 +15,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // Handler serves HTTP endpoints for donation checkouts and webhook processing.
@@ -279,10 +280,10 @@ func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 type xenditCallbackPayload struct {
-	ID         string  `json:"id"`
-	ExternalID string  `json:"external_id"`
-	Status     string  `json:"status"`
-	Amount     float64 `json:"amount"`
+	ID         string          `json:"id"`
+	ExternalID string          `json:"external_id"`
+	Status     string          `json:"status"`
+	Amount     decimal.Decimal `json:"amount"`
 }
 
 func (h *Handler) handleXenditWebhook(w http.ResponseWriter, r *http.Request) {
@@ -292,7 +293,12 @@ func (h *Handler) handleXenditWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.webhookToken != "" && subtle.ConstantTimeCompare([]byte(callbackToken), []byte(h.webhookToken)) != 1 {
+	// Fail-closed: webhook verification token MUST be configured and match in constant time
+	if strings.TrimSpace(h.webhookToken) == "" {
+		httperr.InternalServerError(w, r)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(callbackToken), []byte(h.webhookToken)) != 1 {
 		httperr.Unauthorized(w, r, "Invalid x-callback-token webhook signature.")
 		return
 	}

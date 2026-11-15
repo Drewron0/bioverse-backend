@@ -189,7 +189,7 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 
 		xenditGateway := payment.NewXenditClient(cfg.Payment.XenditSecretKey, log)
 
-		donationService := donation.NewService(db, queries, conservationService, xenditGateway)
+		donationService := donation.NewService(db, queries, conservationService, xenditGateway, emailSender, fcmDispatcher)
 		isDev := cfg.App.Environment == "development"
 		donationHandler := donation.NewHandler(donationService, cfg.Payment.XenditWebhookToken, isDev)
 		donationHandler.RegisterRoutes(r, userAuthMiddleware)

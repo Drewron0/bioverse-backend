@@ -10,6 +10,8 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/conservation"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
+	"github.com/Drewron0/bioverse-backend/internal/platform/email"
+	"github.com/Drewron0/bioverse-backend/internal/platform/notification"
 	"github.com/Drewron0/bioverse-backend/internal/platform/payment"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
@@ -76,10 +78,12 @@ type Service struct {
 	store               store.Querier
 	conservationService *conservation.Service
 	gateway             payment.Gateway
+	emailSender         email.Sender
+	pushNotifier        notification.Dispatcher
 }
 
 // NewService constructs a new donation service.
-func NewService(pool *pgxpool.Pool, q store.Querier, consSvc *conservation.Service, gw payment.Gateway) *Service {
+func NewService(pool *pgxpool.Pool, q store.Querier, consSvc *conservation.Service, gw payment.Gateway, emailSender email.Sender, pushNotifier notification.Dispatcher) *Service {
 	if gw == nil {
 		gw = payment.NewXenditClient("", nil)
 	}
@@ -88,6 +92,8 @@ func NewService(pool *pgxpool.Pool, q store.Querier, consSvc *conservation.Servi
 		store:               q,
 		conservationService: consSvc,
 		gateway:             gw,
+		emailSender:         emailSender,
+		pushNotifier:        pushNotifier,
 	}
 }
 
@@ -477,8 +483,8 @@ func (s *Service) ListUserDonationsWithCursor(ctx context.Context, userID uuid.U
 	return rows, nextCursor, nil
 }
 
-// ProcessXenditInvoiceWebhook handles idempotency deduplication via webhook_events, nominal checking, and atomic execution.
-func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEventID, externalID, status string, amount float64, rawPayload []byte) error {
+// ProcessXenditInvoiceWebhook handles idempotency deduplication via webhook_events, strict IDR settlement nominal verification, and atomic state transition in a single transaction.
+func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEventID, externalID, status string, amount decimal.Decimal, rawPayload []byte) error {
 	if !strings.HasPrefix(externalID, "donation_") {
 		return nil
 	}
@@ -493,22 +499,12 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 		externalEventID = fmt.Sprintf("%s_%s", externalID, strings.ToLower(status))
 	}
 
-	// 1. Check idempotency deduplication in webhook_events
-	existingEvent, err := s.store.GetWebhookEventByProviderAndExternalID(ctx, store.GetWebhookEventByProviderAndExternalIDParams{
-		Provider:        "xendit",
-		ExternalEventID: externalEventID,
-	})
-	if err == nil {
-		if existingEvent.Status == store.WebhookProcessStatusProcessed {
-			// Already processed successfully: idempotent return
-			return nil
-		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("failed to query webhook_events: %w", err)
-	} else {
-		// Insert initial event record
+	return database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+
+		// 1. Atomically record or check existing webhook event (INSERT ... ON CONFLICT DO NOTHING)
 		eventID, _ := uuid.NewV7()
-		_, _ = s.store.RecordWebhookEvent(ctx, store.RecordWebhookEventParams{
+		createdEvent, err := txStore.RecordWebhookEvent(ctx, store.RecordWebhookEventParams{
 			ID:              eventID,
 			Provider:        "xendit",
 			ExternalEventID: externalEventID,
@@ -516,75 +512,149 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			Payload:         rawPayload,
 			Status:          store.WebhookProcessStatusPending,
 		})
-	}
+		if err != nil {
+			return fmt.Errorf("failed to record webhook event: %w", err)
+		}
 
-	if !strings.EqualFold(status, "PAID") {
-		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-			Provider:        "xendit",
-			ExternalEventID: externalEventID,
-			Status:          store.WebhookProcessStatusIgnored,
-			ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		// If no row was inserted, event with this (provider, external_event_id) already exists!
+		if createdEvent.ID == uuid.Nil {
+			existing, err := txStore.GetWebhookEventByProviderAndExternalID(ctx, store.GetWebhookEventByProviderAndExternalIDParams{
+				Provider:        "xendit",
+				ExternalEventID: externalEventID,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to lookup existing webhook event: %w", err)
+			}
+			if existing.Status == store.WebhookProcessStatusProcessed {
+				// Already processed successfully: idempotent return
+				return nil
+			}
+		}
+
+		if !strings.EqualFold(status, "PAID") {
+			_, err = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+				Provider:        "xendit",
+				ExternalEventID: externalEventID,
+				Status:          store.WebhookProcessStatusIgnored,
+				ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			})
+			return err
+		}
+
+		// 2. Fetch donation
+		donation, err := txStore.GetDonationByID(ctx, donationID)
+		if err != nil {
+			_, _ = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+				Provider:        "xendit",
+				ExternalEventID: externalEventID,
+				Status:          store.WebhookProcessStatusFailed,
+				ErrorMessage:    pgtype.Text{String: "Donation record not found", Valid: true},
+			})
+			return ErrDonationNotFound
+		}
+
+		if donation.PaymentStatus == store.PaymentStatusPaid {
+			_, err = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+				Provider:        "xendit",
+				ExternalEventID: externalEventID,
+				Status:          store.WebhookProcessStatusProcessed,
+				ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			})
+			return err
+		}
+
+		// 3. Strict settlement amount verification (gateway invoices & settles strictly in IDR)
+		expectedSettlement := decimalutil.FromNumeric(donation.SettlementAmount)
+		if !amount.Equal(expectedSettlement) {
+			errMsg := fmt.Sprintf("Settlement amount mismatch: gateway reported %s, donation expects %s IDR",
+				amount.String(), expectedSettlement.String())
+			_, _ = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+				Provider:        "xendit",
+				ExternalEventID: externalEventID,
+				Status:          store.WebhookProcessStatusFailed,
+				ErrorMessage:    pgtype.Text{String: errMsg, Valid: true},
+			})
+			return fmt.Errorf("%w: %s", ErrAmountMismatch, errMsg)
+		}
+
+		// 4. Mark donation as paid
+		now := time.Now().UTC()
+		_, err = txStore.UpdateDonationPaymentStatus(ctx, store.UpdateDonationPaymentStatusParams{
+			ID:                 donationID,
+			PaymentStatus:      store.PaymentStatusPaid,
+			PaidAt:             pgtype.Timestamptz{Time: now, Valid: true},
+			ExternalGatewayRef: pgtype.Text{String: fmt.Sprintf("XND-INV-%s", externalEventID), Valid: true},
 		})
-		return nil
-	}
+		if err != nil {
+			return fmt.Errorf("failed to update donation payment status: %w", err)
+		}
 
-	// 2. Fetch donation and verify amount
-	donation, err := s.store.GetDonationByID(ctx, donationID)
-	if err != nil {
-		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-			Provider:        "xendit",
-			ExternalEventID: externalEventID,
-			Status:          store.WebhookProcessStatusFailed,
-			ErrorMessage:    pgtype.Text{String: "Donation record not found", Valid: true},
-		})
-		return ErrDonationNotFound
-	}
+		if donation.IsPointsLocked && donation.PointsUsed > 0 {
+			user, err := txStore.SpendUserPoints(ctx, store.SpendUserPointsParams{
+				ID:            donation.UserID,
+				PointsBalance: donation.PointsUsed,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to spend user points: %w", err)
+			}
 
-	if donation.PaymentStatus == store.PaymentStatusPaid {
-		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			ledgerID, _ := uuid.NewV7()
+			_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
+				ID:              ledgerID,
+				UserID:          donation.UserID,
+				TransactionType: store.PointTxTypeSpendDonation,
+				Amount:          -donation.PointsUsed,
+				BalanceAfter:    user.PointsBalance,
+				ReferenceType:   "donations",
+				ReferenceID:     donationID,
+				Description:     "Spent points on confirmed donation",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to create point spend ledger entry: %w", err)
+			}
+		}
+
+		project, err := txStore.GetConservationProjectByID(ctx, donation.ProjectID)
+		if err != nil {
+			return fmt.Errorf("failed to get conservation project: %w", err)
+		}
+
+		_, err = s.conservationService.AllocateFragments(
+			ctx,
+			tx,
+			project.ZoneID,
+			project.ID,
+			donation.UserID,
+			donationID,
+			int(donation.UnitQuantity),
+			project.SpeciesOrTypeName,
+			"",
+		)
+		if err != nil {
+			return fmt.Errorf("failed to allocate fragments: %w", err)
+		}
+
+		// 5. Mark webhook event processed in the exact same transaction
+		_, err = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
 			Provider:        "xendit",
 			ExternalEventID: externalEventID,
 			Status:          store.WebhookProcessStatusProcessed,
-			ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			ProcessedAt:     pgtype.Timestamptz{Time: now, Valid: true},
 		})
+		if err != nil {
+			return fmt.Errorf("failed to update webhook event status: %w", err)
+		}
+
+		// 6. Optional notification dispatch after commit
+		if s.emailSender != nil {
+			donor, err := txStore.GetUserByID(ctx, donation.UserID)
+			if err == nil {
+				_ = s.emailSender.Send(ctx, donor.Email, "Donation Confirmed - BioVerse",
+					fmt.Sprintf("Thank you %s! Your donation for %d units in %s has been received.",
+						donor.FullName, donation.UnitQuantity, project.Title))
+			}
+		}
+
 		return nil
-	}
-
-	paidAmountDec := decimal.NewFromFloat(amount)
-	expectedSettlement := decimalutil.FromNumeric(donation.SettlementAmount)
-	expectedMoney := decimalutil.FromNumeric(donation.MoneyAmountPaid)
-
-	// Check if payment amount matches either settlement amount or gross money paid
-	if !paidAmountDec.Equal(expectedSettlement) && !paidAmountDec.Equal(expectedMoney) {
-		errMsg := fmt.Sprintf("Amount mismatch: webhook reported %.2f, donation expects %s (settlement) or %s (money)",
-			amount, expectedSettlement.String(), expectedMoney.String())
-		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-			Provider:        "xendit",
-			ExternalEventID: externalEventID,
-			Status:          store.WebhookProcessStatusFailed,
-			ErrorMessage:    pgtype.Text{String: errMsg, Valid: true},
-		})
-		return fmt.Errorf("%w: %s", ErrAmountMismatch, errMsg)
-	}
-
-	// 3. Mark donation as paid
-	_, err = s.ProcessPaidDonation(ctx, donationID, nil, "")
-	if err != nil {
-		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-			Provider:        "xendit",
-			ExternalEventID: externalEventID,
-			Status:          store.WebhookProcessStatusFailed,
-			ErrorMessage:    pgtype.Text{String: err.Error(), Valid: true},
-		})
-		return fmt.Errorf("failed to process paid donation state: %w", err)
-	}
-
-	_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-		Provider:        "xendit",
-		ExternalEventID: externalEventID,
-		Status:          store.WebhookProcessStatusProcessed,
-		ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 	})
-
-	return nil
 }

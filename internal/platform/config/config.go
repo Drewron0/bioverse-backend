@@ -194,11 +194,11 @@ func Load() (*Config, error) {
 		if cfg.Auth.HMACSecret == "hmac_secret_key_for_searchable_hashes" || len(cfg.Auth.HMACSecret) < 16 {
 			return nil, fmt.Errorf("insecure or default HMAC_SECRET configured for %s environment", cfg.App.Environment)
 		}
-		if cfg.Payment.XenditSecretKey == "xnd_development_placeholder" {
-			return nil, fmt.Errorf("insecure default XENDIT_SECRET_KEY configured for %s environment", cfg.App.Environment)
+		if cfg.Payment.XenditSecretKey == "xnd_development_placeholder" || strings.TrimSpace(cfg.Payment.XenditSecretKey) == "" {
+			return nil, fmt.Errorf("insecure or missing XENDIT_SECRET_KEY configured for %s environment", cfg.App.Environment)
 		}
-		if cfg.Payment.XenditWebhookToken == "webhook_verification_token_placeholder" {
-			return nil, fmt.Errorf("insecure default XENDIT_WEBHOOK_TOKEN configured for %s environment", cfg.App.Environment)
+		if cfg.Payment.XenditWebhookToken == "webhook_verification_token_placeholder" || strings.TrimSpace(cfg.Payment.XenditWebhookToken) == "" {
+			return nil, fmt.Errorf("insecure or missing XENDIT_WEBHOOK_TOKEN configured for %s environment", cfg.App.Environment)
 		}
 	}
 
