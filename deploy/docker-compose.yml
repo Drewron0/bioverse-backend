@@ -59,19 +59,31 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     environment:
+      APP_NAME: ${APP_NAME:-BioVerse}
       APP_ENV: ${APP_ENV:-development}
       PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173,http://localhost:8080}
       DATABASE_URL: postgres://${DB_USER:-bioverse}:${DB_PASSWORD:-bioverse_dev}@postgres:5432/${DB_NAME:-bioverse}?sslmode=disable
-      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-bioverse_minio}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-bioverse_minio_secret}
       STORAGE_BUCKET_NAME: ${STORAGE_BUCKET_NAME:-bioverse-media}
-      STORAGE_USE_SSL: "false"
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_USE_SSL: ${STORAGE_USE_SSL:-false}
       JWT_SECRET: ${JWT_SECRET:-super_secret_key_bioverse_2026_change_in_production}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-168h}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       HMAC_SECRET: ${HMAC_SECRET:-hmac_secret_key_for_searchable_hashes}
       XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-xnd_development_placeholder}
       XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-webhook_verification_token_placeholder}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-BioVerse <onboarding@resend.dev>}
+      FCM_CREDENTIALS_JSON_PATH: ${FCM_CREDENTIALS_JSON_PATH:-}
+      CV_SERVICE_URL: ${CV_SERVICE_URL:-http://localhost:8001}
+      CV_MIN_CONFIDENCE: ${CV_MIN_CONFIDENCE:-0.80}
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,11 +101,14 @@ services:
       APP_ENV: ${APP_ENV:-development}
       RUN_MIGRATIONS: "false"
       DATABASE_URL: postgres://${DB_USER:-bioverse}:${DB_PASSWORD:-bioverse_dev}@postgres:5432/${DB_NAME:-bioverse}?sslmode=disable
-      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-bioverse_minio}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-bioverse_minio_secret}
       STORAGE_BUCKET_NAME: ${STORAGE_BUCKET_NAME:-bioverse-media}
-      STORAGE_USE_SSL: "false"
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_USE_SSL: ${STORAGE_USE_SSL:-false}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-xnd_development_placeholder}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
