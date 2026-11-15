@@ -1968,6 +1968,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/admin/b2b/companies/{id}:
+    get:
+      tags:
+        - Admin B2B & ESG
+      summary: Get corporate company detail (Admin only)
+      description: Retrieves onboarded corporate client profile by ID.
+      operationId: getB2bCompany
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Company UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Corporate company details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/B2bCompanyDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/admin/b2b/companies/{id}/members:
     post:
       tags:

@@ -3,6 +3,7 @@ package donation
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
@@ -99,7 +101,7 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM pet_boosts WHERE user_id = $1", userID)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM virtual_pets WHERE user_id = $1", userID)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM point_ledgers WHERE user_id = $1", userID)
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM webhook_events WHERE provider = 'xendit'")
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM webhook_events WHERE provider = 'xendit' AND (external_event_id LIKE 'evt_%' OR payload::text LIKE $1)", "%"+userID.String()+"%")
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM coral_fragments WHERE spider_frame_id = $1 OR adopted_by_user_id = $2", testFrameID, userID)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM donations WHERE user_id = $1", userID)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM spider_frames WHERE id = $1", testFrameID)
@@ -314,5 +316,46 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	err = donSvc.ProcessXenditInvoiceWebhook(ctx, replayWebhookEventID, replayWebhookExtID, "PAID", pendingRes.SettlementAmount, []byte(`{"status":"PAID"}`))
 	if err != nil {
 		t.Fatalf("replaying identical webhook delivery failed (expected idempotent success): %v", err)
+	}
+
+	// 13. Audit trail persistence test: failed webhook (e.g. nominal mismatch) must rollback donation tx but preserve webhook_events record with status 'failed'
+	failedDonationKey := uuid.New().String()
+	failedDonRes, err := donSvc.Checkout(ctx, CheckoutInput{
+		IdempotencyKey: failedDonationKey,
+		UserID:         userID,
+		ProjectID:      &testProjectID,
+		UnitQuantity:   1,
+		PaymentMethod:  store.PaymentMethodTypeQris,
+	})
+	if err != nil {
+		t.Fatalf("checkout failed for audit test donation: %v", err)
+	}
+
+	failedEventID := "evt_mismatch_" + uuid.New().String()
+	wrongAmount := failedDonRes.SettlementAmount.Add(decimal.NewFromInt(50000)) // mismatched amount
+	err = donSvc.ProcessXenditInvoiceWebhook(ctx, failedEventID, "donation_"+failedDonRes.DonationID.String(), "PAID", wrongAmount, []byte(`{"status":"PAID","amount":999999}`))
+	if err == nil {
+		t.Fatalf("expected error on nominal mismatch, got nil")
+	}
+
+	// Verify donation remains pending (business transaction rolled back)
+	var donStatus store.PaymentStatus
+	err = pool.QueryRow(ctx, "SELECT payment_status FROM donations WHERE id = $1", failedDonRes.DonationID).Scan(&donStatus)
+	if err != nil || donStatus != store.PaymentStatusPending {
+		t.Fatalf("expected donation to remain pending, got %v (err: %v)", donStatus, err)
+	}
+
+	// Verify webhook event audit record is PRESERVED with status 'failed' (audit not rolled back)
+	var eventStatus store.WebhookProcessStatus
+	var errMsg *string
+	err = pool.QueryRow(ctx, "SELECT status, error_message FROM webhook_events WHERE provider = 'xendit' AND external_event_id = $1", failedEventID).Scan(&eventStatus, &errMsg)
+	if err != nil {
+		t.Fatalf("failed to query webhook_events audit log: %v", err)
+	}
+	if eventStatus != store.WebhookProcessStatusFailed {
+		t.Errorf("expected webhook event status 'failed', got '%s'", eventStatus)
+	}
+	if errMsg == nil || !strings.Contains(*errMsg, "Settlement amount mismatch") {
+		t.Errorf("expected error message to contain 'Settlement amount mismatch', got %v", errMsg)
 	}
 }

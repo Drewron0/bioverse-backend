@@ -53,7 +53,7 @@ jobs:
 
       - name: Install Goose & Run Migrations
         run: |
-          go install github.com/pressly/goose/v3/cmd/goose@latest
+          go install github.com/pressly/goose/v3/cmd/goose@v3.24.1
           goose -dir db/migrations postgres "$DATABASE_URL" up
 
       - name: Run Tests with Race Detector

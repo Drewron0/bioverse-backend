@@ -151,7 +151,10 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	var projectZoneID uuid.UUID
 	var projectSpecies string
 
-	bioShieldPrice := s.getBioShieldPrice(ctx)
+	bioShieldPrice, err := s.getBioShieldPrice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine bio-shield price: %w", err)
+	}
 
 	if donationType == store.DonationTypeBioShieldAddon {
 		activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
@@ -237,7 +240,10 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		}
 	}
 
-	pointsRate := s.getPointsRate(ctx)
+	pointsRate, err := s.getPointsRate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine points rate: %w", err)
+	}
 	pointsDiscount := decimal.Zero
 	if in.PointsToUse > 0 {
 		pointsDiscount = decimal.NewFromInt(in.PointsToUse).Mul(pointsRate)
@@ -251,7 +257,10 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		moneyAmountPaid = decimal.Zero
 	}
 
-	exchangeRate := s.getUSDToIDRExchangeRate(ctx)
+	exchangeRate, err := s.getUSDToIDRExchangeRate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine USD to IDR exchange rate: %w", err)
+	}
 	settlementAmount := moneyAmountPaid.Mul(exchangeRate).Round(0)
 
 	donationID, _ := uuid.NewV7()
@@ -670,92 +679,75 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 		externalEventID = fmt.Sprintf("%s_%s", externalID, strings.ToLower(status))
 	}
 
-	return database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		txStore := store.New(tx)
+	// 1. Record incoming webhook event outside of business tx so audit trail is NEVER rolled back
+	eventID, _ := uuid.NewV7()
+	createdEvent, err := s.store.RecordWebhookEvent(ctx, store.RecordWebhookEventParams{
+		ID:              eventID,
+		Provider:        "xendit",
+		ExternalEventID: externalEventID,
+		EventType:       "invoice." + strings.ToLower(status),
+		Payload:         rawPayload,
+		Status:          store.WebhookProcessStatusPending,
+	})
 
-		// 1. Atomically record or check existing webhook event (INSERT ... ON CONFLICT DO NOTHING)
-		eventID, _ := uuid.NewV7()
-		createdEvent, err := txStore.RecordWebhookEvent(ctx, store.RecordWebhookEventParams{
-			ID:              eventID,
+	isDuplicate := false
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			isDuplicate = true
+		} else {
+			return fmt.Errorf("failed to record webhook event: %w", err)
+		}
+	} else if createdEvent.ID == uuid.Nil {
+		isDuplicate = true
+	}
+
+	if isDuplicate {
+		existing, err := s.store.GetWebhookEventByProviderAndExternalID(ctx, store.GetWebhookEventByProviderAndExternalIDParams{
 			Provider:        "xendit",
 			ExternalEventID: externalEventID,
-			EventType:       "invoice." + strings.ToLower(status),
-			Payload:         rawPayload,
-			Status:          store.WebhookProcessStatusPending,
 		})
-
-		isDuplicate := false
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
-				isDuplicate = true
-			} else {
-				return fmt.Errorf("failed to record webhook event: %w", err)
-			}
-		} else if createdEvent.ID == uuid.Nil {
-			isDuplicate = true
+			return fmt.Errorf("failed to lookup existing webhook event: %w", err)
 		}
-
-		if isDuplicate {
-			existing, err := txStore.GetWebhookEventByProviderAndExternalID(ctx, store.GetWebhookEventByProviderAndExternalIDParams{
-				Provider:        "xendit",
-				ExternalEventID: externalEventID,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to lookup existing webhook event: %w", err)
-			}
-			if existing.Status == store.WebhookProcessStatusProcessed || existing.Status == store.WebhookProcessStatusIgnored {
-				// Already processed or ignored successfully: idempotent return
-				return nil
-			}
+		if existing.Status == store.WebhookProcessStatusProcessed || existing.Status == store.WebhookProcessStatusIgnored {
+			// Already processed or ignored successfully: idempotent return
+			return nil
 		}
+	}
 
-		if !strings.EqualFold(status, "PAID") {
-			_, err = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-				Provider:        "xendit",
-				ExternalEventID: externalEventID,
-				Status:          store.WebhookProcessStatusIgnored,
-				ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-			})
-			return err
-		}
+	if !strings.EqualFold(status, "PAID") {
+		_, err = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusIgnored,
+			ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		})
+		return err
+	}
 
-		// 2. Fetch donation
+	// 2. Execute business fulfillment transaction atomically
+	txErr := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+
+		// Fetch donation
 		donation, err := txStore.GetDonationByID(ctx, donationID)
 		if err != nil {
-			_, _ = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-				Provider:        "xendit",
-				ExternalEventID: externalEventID,
-				Status:          store.WebhookProcessStatusFailed,
-				ErrorMessage:    pgtype.Text{String: "Donation record not found", Valid: true},
-			})
 			return ErrDonationNotFound
 		}
 
 		if donation.PaymentStatus == store.PaymentStatusPaid {
-			_, err = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-				Provider:        "xendit",
-				ExternalEventID: externalEventID,
-				Status:          store.WebhookProcessStatusProcessed,
-				ProcessedAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-			})
-			return err
+			return nil
 		}
 
-		// 3. Strict settlement amount verification (gateway invoices & settles strictly in IDR)
+		// Strict settlement amount verification (gateway invoices & settles strictly in IDR)
 		expectedSettlement := decimalutil.FromNumeric(donation.SettlementAmount)
 		if !amount.Equal(expectedSettlement) {
 			errMsg := fmt.Sprintf("Settlement amount mismatch: gateway reported %s, donation expects %s IDR",
 				amount.String(), expectedSettlement.String())
-			_, _ = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-				Provider:        "xendit",
-				ExternalEventID: externalEventID,
-				Status:          store.WebhookProcessStatusFailed,
-				ErrorMessage:    pgtype.Text{String: errMsg, Valid: true},
-			})
 			return fmt.Errorf("%w: %s", ErrAmountMismatch, errMsg)
 		}
 
-		// 4. Mark donation as paid
+		// Mark donation as paid
 		now := time.Now().UTC()
 		_, err = txStore.UpdateDonationPaymentStatus(ctx, store.UpdateDonationPaymentStatusParams{
 			ID:                 donationID,
@@ -845,18 +837,7 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			}
 		}
 
-		// 5. Mark webhook event processed in the exact same transaction
-		_, err = txStore.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
-			Provider:        "xendit",
-			ExternalEventID: externalEventID,
-			Status:          store.WebhookProcessStatusProcessed,
-			ProcessedAt:     pgtype.Timestamptz{Time: now, Valid: true},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to update webhook event status: %w", err)
-		}
-
-		// 6. Optional notification dispatch after commit
+		// Optional notification dispatch after commit
 		if s.emailSender != nil {
 			donor, err := txStore.GetUserByID(ctx, donation.UserID)
 			if err == nil {
@@ -868,60 +849,82 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 
 		return nil
 	})
+
+	now := time.Now().UTC()
+	if txErr != nil {
+		// Preserve audit trail in webhook_events even when business tx failed/rolled back
+		_, _ = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+			Provider:        "xendit",
+			ExternalEventID: externalEventID,
+			Status:          store.WebhookProcessStatusFailed,
+			ErrorMessage:    pgtype.Text{String: txErr.Error(), Valid: true},
+			ProcessedAt:     pgtype.Timestamptz{Time: now, Valid: true},
+		})
+		return txErr
+	}
+
+	// 3. Mark webhook event as processed
+	_, err = s.store.UpdateWebhookEventStatus(ctx, store.UpdateWebhookEventStatusParams{
+		Provider:        "xendit",
+		ExternalEventID: externalEventID,
+		Status:          store.WebhookProcessStatusProcessed,
+		ProcessedAt:     pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	return err
 }
 
-func (s *Service) getBioShieldPrice(ctx context.Context) decimal.Decimal {
-	price := decimal.NewFromFloat(1.80)
+func (s *Service) getBioShieldPrice(ctx context.Context) (decimal.Decimal, error) {
 	setting, err := s.store.GetAppSetting(ctx, "bio_shield_addon_price_usd")
-	if err == nil {
-		var rawStr string
-		if err := json.Unmarshal(setting.SettingValue, &rawStr); err == nil {
-			if parsed, err := decimal.NewFromString(rawStr); err == nil && parsed.IsPositive() {
-				return parsed
-			}
-		} else {
-			var num float64
-			if err := json.Unmarshal(setting.SettingValue, &num); err == nil && num > 0 {
-				return decimal.NewFromFloat(num)
-			}
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("failed to retrieve bio_shield_addon_price_usd setting: %w", err)
+	}
+	var rawStr string
+	if err := json.Unmarshal(setting.SettingValue, &rawStr); err == nil {
+		if parsed, err := decimal.NewFromString(rawStr); err == nil && parsed.IsPositive() {
+			return parsed, nil
+		}
+	} else {
+		var num float64
+		if err := json.Unmarshal(setting.SettingValue, &num); err == nil && num > 0 {
+			return decimal.NewFromFloat(num), nil
 		}
 	}
-	return price
+	return decimal.Zero, errors.New("invalid or non-positive bio_shield_addon_price_usd setting value")
 }
 
-func (s *Service) getPointsRate(ctx context.Context) decimal.Decimal {
-	rate := decimal.NewFromFloat(0.01) // 100 points = $1.00 USD
+func (s *Service) getPointsRate(ctx context.Context) (decimal.Decimal, error) {
 	setting, err := s.store.GetAppSetting(ctx, "points_per_usd")
-	if err == nil {
-		var rawStr string
-		var pointsPerUSD decimal.Decimal
-		if err := json.Unmarshal(setting.SettingValue, &rawStr); err == nil {
-			pointsPerUSD, _ = decimal.NewFromString(rawStr)
-		} else {
-			var num float64
-			if err := json.Unmarshal(setting.SettingValue, &num); err == nil && num > 0 {
-				pointsPerUSD = decimal.NewFromFloat(num)
-			}
-		}
-		if pointsPerUSD.IsPositive() {
-			return decimal.NewFromInt(1).Div(pointsPerUSD)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("failed to retrieve points_per_usd setting: %w", err)
+	}
+	var rawStr string
+	var pointsPerUSD decimal.Decimal
+	if err := json.Unmarshal(setting.SettingValue, &rawStr); err == nil {
+		pointsPerUSD, _ = decimal.NewFromString(rawStr)
+	} else {
+		var num float64
+		if err := json.Unmarshal(setting.SettingValue, &num); err == nil && num > 0 {
+			pointsPerUSD = decimal.NewFromFloat(num)
 		}
 	}
-	return rate
+	if pointsPerUSD.IsPositive() {
+		return decimal.NewFromInt(1).Div(pointsPerUSD), nil
+	}
+	return decimal.Zero, errors.New("invalid or non-positive points_per_usd setting value")
 }
 
-func (s *Service) getUSDToIDRExchangeRate(ctx context.Context) decimal.Decimal {
-	rate := decimal.NewFromInt(16000)
+func (s *Service) getUSDToIDRExchangeRate(ctx context.Context) (decimal.Decimal, error) {
 	record, err := s.store.GetLatestExchangeRate(ctx, store.GetLatestExchangeRateParams{
 		BaseCode:  "USD",
 		QuoteCode: "IDR",
 	})
-	if err == nil {
-		rateDec := decimalutil.FromNumeric(record.Rate)
-		if rateDec.IsPositive() {
-			return rateDec
-		}
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("failed to retrieve latest USD-IDR exchange rate: %w", err)
 	}
-	return rate
+	rateDec := decimalutil.FromNumeric(record.Rate)
+	if !rateDec.IsPositive() {
+		return decimal.Zero, errors.New("non-positive USD-IDR exchange rate retrieved from database")
+	}
+	return rateDec, nil
 }
 
