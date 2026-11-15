@@ -55,6 +55,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 type checkoutRequest struct {
 	DonationType       string  `json:"donation_type"`
 	ProjectID          *string `json:"project_id"`
+	Quantity           int     `json:"quantity"`
 	UnitQuantity       int     `json:"unit_quantity"`
 	IncludeBioShield   bool    `json:"include_bio_shield"`
 	TargetPetID        *string `json:"target_pet_id"`
@@ -105,8 +106,12 @@ func (h *Handler) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UnitQuantity <= 0 {
-		req.UnitQuantity = 1
+	unitQty := req.UnitQuantity
+	if unitQty <= 0 {
+		unitQty = req.Quantity
+	}
+	if unitQty <= 0 {
+		unitQty = 1
 	}
 
 	var projectID *uuid.UUID
@@ -158,7 +163,7 @@ func (h *Handler) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		UserID:           userID,
 		DonationType:     donationType,
 		ProjectID:        projectID,
-		UnitQuantity:     req.UnitQuantity,
+		UnitQuantity:     unitQty,
 		IncludeBioShield: req.IncludeBioShield,
 		TargetPetID:      targetPetID,
 		CoralNickname:    req.CoralNickname,
@@ -185,11 +190,28 @@ func (h *Handler) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var qrCodeString *string
+	if result.QRISPayload != "" {
+		qrCodeString = &result.QRISPayload
+	}
+	var vaNumber *string
+	if result.VANumber != "" {
+		vaNumber = &result.VANumber
+	}
+	var bankCode *string
+	if result.BankCode != "" {
+		bankCode = &result.BankCode
+	}
+	var paymentURL *string
+	if result.PaymentURL != "" {
+		paymentURL = &result.PaymentURL
+	}
+
 	paymentDetails := map[string]interface{}{
-		"qr_code_string": result.QRISPayload,
-		"va_number":      result.VANumber,
-		"bank_code":      result.BankCode,
-		"payment_url":    nil,
+		"qr_code_string": qrCodeString,
+		"va_number":      vaNumber,
+		"bank_code":      bankCode,
+		"payment_url":    paymentURL,
 	}
 
 	resp := checkoutResponse{

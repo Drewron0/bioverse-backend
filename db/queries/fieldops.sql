@@ -95,6 +95,38 @@ ORDER BY op.created_at DESC;
 
 -- name: UpdateOperatorPayoutStatus :one
 UPDATE operator_payouts
-SET status = $2, approved_at = $3, disbursed_at = $4, external_disbursement_id = $5, failure_reason = $6
+SET status = $2,
+    approved_by_admin_id = COALESCE(sqlc.narg('approved_by_admin_id'), approved_by_admin_id),
+    approved_at = COALESCE(sqlc.narg('approved_at'), approved_at),
+    disbursed_at = COALESCE(sqlc.narg('disbursed_at'), disbursed_at),
+    external_disbursement_id = COALESCE(sqlc.narg('external_disbursement_id'), external_disbursement_id),
+    failure_reason = COALESCE(sqlc.narg('failure_reason'), failure_reason)
 WHERE id = $1
 RETURNING *;
+
+-- name: GetOperatorPayoutByIdempotencyKey :one
+SELECT * FROM operator_payouts
+WHERE idempotency_key = $1
+LIMIT 1;
+
+-- name: GetOperatorVerifiedWorkLogsSummary :one
+SELECT 
+    COALESCE(SUM(CASE WHEN task_type = 'planting' THEN units_completed ELSE 0 END), 0)::int AS units_planted,
+    COALESCE(SUM(CASE WHEN task_type != 'planting' THEN units_completed ELSE 0 END), 0)::int AS maintenance_tasks,
+    COALESCE(SUM(fee_earned_idr), 0)::numeric AS total_fee_earned_idr
+FROM operator_work_logs
+WHERE operator_id = $1
+  AND work_date >= $2
+  AND work_date <= $3
+  AND verification_status = 'verified'
+  AND payout_id IS NULL;
+
+-- name: LinkWorkLogsToPayout :exec
+UPDATE operator_work_logs
+SET payout_id = $1
+WHERE operator_id = $2
+  AND work_date >= $3
+  AND work_date <= $4
+  AND verification_status = 'verified'
+  AND payout_id IS NULL;
+

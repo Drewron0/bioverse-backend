@@ -413,6 +413,97 @@ func (q *Queries) GetOperatorPayoutByID(ctx context.Context, id uuid.UUID) (Oper
 	return i, err
 }
 
+const getOperatorPayoutByIdempotencyKey = `-- name: GetOperatorPayoutByIdempotencyKey :one
+SELECT id, idempotency_key, operator_id, approved_by_admin_id, period_start, period_end, total_units_planted, total_maintenance_tasks, gross_amount_idr, transfer_fee_idr, net_disbursed_idr, payout_gateway_provider, external_disbursement_id, status, failure_reason, approved_at, disbursed_at, created_at FROM operator_payouts
+WHERE idempotency_key = $1
+LIMIT 1
+`
+
+func (q *Queries) GetOperatorPayoutByIdempotencyKey(ctx context.Context, idempotencyKey string) (OperatorPayouts, error) {
+	row := q.db.QueryRow(ctx, getOperatorPayoutByIdempotencyKey, idempotencyKey)
+	var i OperatorPayouts
+	err := row.Scan(
+		&i.ID,
+		&i.IdempotencyKey,
+		&i.OperatorID,
+		&i.ApprovedByAdminID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.TotalUnitsPlanted,
+		&i.TotalMaintenanceTasks,
+		&i.GrossAmountIdr,
+		&i.TransferFeeIdr,
+		&i.NetDisbursedIdr,
+		&i.PayoutGatewayProvider,
+		&i.ExternalDisbursementID,
+		&i.Status,
+		&i.FailureReason,
+		&i.ApprovedAt,
+		&i.DisbursedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOperatorVerifiedWorkLogsSummary = `-- name: GetOperatorVerifiedWorkLogsSummary :one
+SELECT 
+    COALESCE(SUM(CASE WHEN task_type = 'planting' THEN units_completed ELSE 0 END), 0)::int AS units_planted,
+    COALESCE(SUM(CASE WHEN task_type != 'planting' THEN units_completed ELSE 0 END), 0)::int AS maintenance_tasks,
+    COALESCE(SUM(fee_earned_idr), 0)::numeric AS total_fee_earned_idr
+FROM operator_work_logs
+WHERE operator_id = $1
+  AND work_date >= $2
+  AND work_date <= $3
+  AND verification_status = 'verified'
+  AND payout_id IS NULL
+`
+
+type GetOperatorVerifiedWorkLogsSummaryParams struct {
+	OperatorID uuid.UUID          `json:"operator_id"`
+	WorkDate   pgtype.Timestamptz `json:"work_date"`
+	WorkDate_2 pgtype.Timestamptz `json:"work_date_2"`
+}
+
+type GetOperatorVerifiedWorkLogsSummaryRow struct {
+	UnitsPlanted      int32          `json:"units_planted"`
+	MaintenanceTasks  int32          `json:"maintenance_tasks"`
+	TotalFeeEarnedIdr pgtype.Numeric `json:"total_fee_earned_idr"`
+}
+
+func (q *Queries) GetOperatorVerifiedWorkLogsSummary(ctx context.Context, arg GetOperatorVerifiedWorkLogsSummaryParams) (GetOperatorVerifiedWorkLogsSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getOperatorVerifiedWorkLogsSummary, arg.OperatorID, arg.WorkDate, arg.WorkDate_2)
+	var i GetOperatorVerifiedWorkLogsSummaryRow
+	err := row.Scan(&i.UnitsPlanted, &i.MaintenanceTasks, &i.TotalFeeEarnedIdr)
+	return i, err
+}
+
+const linkWorkLogsToPayout = `-- name: LinkWorkLogsToPayout :exec
+UPDATE operator_work_logs
+SET payout_id = $1
+WHERE operator_id = $2
+  AND work_date >= $3
+  AND work_date <= $4
+  AND verification_status = 'verified'
+  AND payout_id IS NULL
+`
+
+type LinkWorkLogsToPayoutParams struct {
+	PayoutID   pgtype.UUID        `json:"payout_id"`
+	OperatorID uuid.UUID          `json:"operator_id"`
+	WorkDate   pgtype.Timestamptz `json:"work_date"`
+	WorkDate_2 pgtype.Timestamptz `json:"work_date_2"`
+}
+
+func (q *Queries) LinkWorkLogsToPayout(ctx context.Context, arg LinkWorkLogsToPayoutParams) error {
+	_, err := q.db.Exec(ctx, linkWorkLogsToPayout,
+		arg.PayoutID,
+		arg.OperatorID,
+		arg.WorkDate,
+		arg.WorkDate_2,
+	)
+	return err
+}
+
 const listFieldOperatorsByZone = `-- name: ListFieldOperatorsByZone :many
 SELECT id, zone_id, group_id, verified_by_admin_id, full_name, can_login, email, phone_number, password_hash, operator_role, nik_encrypted, nik_hmac, kyc_status, bank_code, bank_account_encrypted, bank_account_holder, rate_per_planting_idr, rate_per_maintenance_idr, is_active, created_at FROM field_operators
 WHERE zone_id = $1 AND is_active = true
@@ -719,7 +810,12 @@ func (q *Queries) ListOperatorWorkLogs(ctx context.Context, arg ListOperatorWork
 
 const updateOperatorPayoutStatus = `-- name: UpdateOperatorPayoutStatus :one
 UPDATE operator_payouts
-SET status = $2, approved_at = $3, disbursed_at = $4, external_disbursement_id = $5, failure_reason = $6
+SET status = $2,
+    approved_by_admin_id = COALESCE($3, approved_by_admin_id),
+    approved_at = COALESCE($4, approved_at),
+    disbursed_at = COALESCE($5, disbursed_at),
+    external_disbursement_id = COALESCE($6, external_disbursement_id),
+    failure_reason = COALESCE($7, failure_reason)
 WHERE id = $1
 RETURNING id, idempotency_key, operator_id, approved_by_admin_id, period_start, period_end, total_units_planted, total_maintenance_tasks, gross_amount_idr, transfer_fee_idr, net_disbursed_idr, payout_gateway_provider, external_disbursement_id, status, failure_reason, approved_at, disbursed_at, created_at
 `
@@ -727,6 +823,7 @@ RETURNING id, idempotency_key, operator_id, approved_by_admin_id, period_start, 
 type UpdateOperatorPayoutStatusParams struct {
 	ID                     uuid.UUID          `json:"id"`
 	Status                 PayoutStatus       `json:"status"`
+	ApprovedByAdminID      pgtype.UUID        `json:"approved_by_admin_id"`
 	ApprovedAt             pgtype.Timestamptz `json:"approved_at"`
 	DisbursedAt            pgtype.Timestamptz `json:"disbursed_at"`
 	ExternalDisbursementID pgtype.Text        `json:"external_disbursement_id"`
@@ -737,6 +834,7 @@ func (q *Queries) UpdateOperatorPayoutStatus(ctx context.Context, arg UpdateOper
 	row := q.db.QueryRow(ctx, updateOperatorPayoutStatus,
 		arg.ID,
 		arg.Status,
+		arg.ApprovedByAdminID,
 		arg.ApprovedAt,
 		arg.DisbursedAt,
 		arg.ExternalDisbursementID,

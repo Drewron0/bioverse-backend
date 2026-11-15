@@ -96,6 +96,10 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelCleanup()
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM pet_boosts WHERE user_id = $1", userID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM virtual_pets WHERE user_id = $1", userID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM point_ledgers WHERE user_id = $1", userID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM webhook_events WHERE provider = 'xendit'")
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM coral_fragments WHERE spider_frame_id = $1 OR adopted_by_user_id = $2", testFrameID, userID)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM donations WHERE user_id = $1", userID)
 		_, _ = pool.Exec(cleanupCtx, "DELETE FROM spider_frames WHERE id = $1", testFrameID)
@@ -175,5 +179,112 @@ func TestDonationAndCoralAdoptionEndToEnd(t *testing.T) {
 	// Total should be $3.20 + $1.80 = $5.00
 	if bioShieldRes.GrossProjectValue.String() != "5" && bioShieldRes.GrossProjectValue.String() != "5.00" {
 		t.Errorf("expected gross value 5.00, got %s", bioShieldRes.GrossProjectValue.String())
+	}
+
+	// 8. Process Xendit webhook for the Bio-Shield adoption with "donation_" prefix
+	webhookExtID := fmt.Sprintf("donation_%s", bioShieldRes.DonationID)
+	err = donSvc.ProcessXenditInvoiceWebhook(ctx, "evt_"+uuid.New().String(), webhookExtID, "PAID", bioShieldRes.SettlementAmount, []byte(`{"status":"PAID"}`))
+	if err != nil {
+		t.Fatalf("failed to process webhook for bio-shield adoption: %v", err)
+	}
+	updatedBioDonation, err := donSvc.GetDonation(ctx, bioShieldRes.DonationID)
+	if err != nil || updatedBioDonation.PaymentStatus != store.PaymentStatusPaid {
+		t.Fatalf("expected donation to be marked paid, got %v", updatedBioDonation.PaymentStatus)
+	}
+
+	// 9. Standalone Bio-Shield purchase ($1.80) does NOT allocate corals but grants pet boost
+	petID, _ := uuid.NewV7()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO virtual_pets (
+			id, user_id, pet_name, pet_species, coral_type, experience_points, health_percent,
+			level, growth_stage, is_primary, last_interacted_at
+		) VALUES (
+			$1, $2, 'Shelly', 'turtle', 'Acropora', 0, 100, 1, 'hatchling', true, NOW()
+		)
+	`, petID, userID)
+	if err != nil {
+		t.Fatalf("failed to create virtual pet for test: %v", err)
+	}
+
+	coralsBeforeStandalone, _ := consSvc.ListUserAdoptedCorals(ctx, userID)
+	standaloneRes, err := donSvc.Checkout(ctx, CheckoutInput{
+		IdempotencyKey:   uuid.New().String(),
+		UserID:           userID,
+		DonationType:     store.DonationTypeBioShieldAddon,
+		ProjectID:        &testProjectID,
+		UnitQuantity:     1,
+		TargetPetID:      &petID,
+		PaymentMethod:    store.PaymentMethodTypeQris,
+	})
+	if err != nil {
+		t.Fatalf("expected standalone Bio-Shield checkout to succeed, got %v", err)
+	}
+	if standaloneRes.GrossProjectValue.String() != "1.8" && standaloneRes.GrossProjectValue.String() != "1.80" {
+		t.Errorf("expected gross value 1.80, got %s", standaloneRes.GrossProjectValue.String())
+	}
+
+	// Process webhook with bare UUID (testing prefix resilience)
+	err = donSvc.ProcessXenditInvoiceWebhook(ctx, "evt_"+uuid.New().String(), standaloneRes.DonationID.String(), "PAID", standaloneRes.SettlementAmount, []byte(`{"status":"PAID"}`))
+	if err != nil {
+		t.Fatalf("failed to process webhook with bare UUID: %v", err)
+	}
+
+	// Verify coral count did NOT increase
+	coralsAfterStandalone, _ := consSvc.ListUserAdoptedCorals(ctx, userID)
+	if len(coralsAfterStandalone) != len(coralsBeforeStandalone) {
+		t.Errorf("expected coral count %d to remain unchanged after standalone bio-shield, got %d",
+			len(coralsBeforeStandalone), len(coralsAfterStandalone))
+	}
+
+	// Verify pet boost was created
+	var boostCount int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM pet_boosts WHERE user_id = $1 AND pet_id = $2", userID, petID).Scan(&boostCount)
+	if err != nil || boostCount == 0 {
+		t.Errorf("expected pet boost to be created, got count %d, err %v", boostCount, err)
+	}
+
+	// 10. Points-only donation: 100% points covers entire payment -> completes synchronously
+	_, err = pool.Exec(ctx, "UPDATE users SET points_balance = 500 WHERE id = $1", userID)
+	if err != nil {
+		t.Fatalf("failed to credit points: %v", err)
+	}
+
+	pointsDonationKey := uuid.New().String()
+	pointsRes, err := donSvc.Checkout(ctx, CheckoutInput{
+		IdempotencyKey: pointsDonationKey,
+		UserID:         userID,
+		ProjectID:      &testProjectID,
+		UnitQuantity:   1,
+		CoralNickname:  "Points Coral",
+		PointsToUse:    320, // 320 points = $3.20 covers 100%
+		PaymentMethod:  store.PaymentMethodTypeQris,
+	})
+	if err != nil {
+		t.Fatalf("expected points-only checkout to succeed, got %v", err)
+	}
+	if pointsRes.PaymentStatus != store.PaymentStatusPaid {
+		t.Errorf("expected points-only donation to complete as paid immediately, got %s", pointsRes.PaymentStatus)
+	}
+	if !pointsRes.MoneyAmountPaid.IsZero() {
+		t.Errorf("expected money amount paid to be 0, got %s", pointsRes.MoneyAmountPaid.String())
+	}
+
+	// Verify points balance was debited immediately (500 - 320 = 180)
+	var remainingPoints int64
+	err = pool.QueryRow(ctx, "SELECT points_balance FROM users WHERE id = $1", userID).Scan(&remainingPoints)
+	if err != nil || remainingPoints != 180 {
+		t.Errorf("expected points balance 180, got %d (err: %v)", remainingPoints, err)
+	}
+
+	// 11. Idempotency test: replaying same idempotency key with different parameters returns ErrIdempotencyKeyReused
+	_, err = donSvc.Checkout(ctx, CheckoutInput{
+		IdempotencyKey: pointsDonationKey,
+		UserID:         userID,
+		ProjectID:      &testProjectID,
+		UnitQuantity:   2, // Different quantity
+		PaymentMethod:  store.PaymentMethodTypeQris,
+	})
+	if err != ErrIdempotencyKeyReused {
+		t.Errorf("expected ErrIdempotencyKeyReused, got %v", err)
 	}
 }

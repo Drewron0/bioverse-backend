@@ -6,7 +6,7 @@ INSERT INTO donations (
     fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider,
     is_mixed_payment, bank_code, va_number, qris_payload, points_used,
     points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status,
-    external_gateway_ref, expired_at
+    external_gateway_ref, expired_at, target_pet_id, coral_nickname, include_bio_shield, payment_url, paid_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
@@ -14,7 +14,7 @@ INSERT INTO donations (
     $16, $17, $18, $19,
     $20, $21, $22, $23, $24,
     $25, $26, $27, $28,
-    $29, $30
+    $29, $30, $31, $32, $33, $34, $35
 ) RETURNING *;
 
 -- name: GetDonationByID :one

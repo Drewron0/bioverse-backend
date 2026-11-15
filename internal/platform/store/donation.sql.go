@@ -20,7 +20,7 @@ INSERT INTO donations (
     fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider,
     is_mixed_payment, bank_code, va_number, qris_payload, points_used,
     points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status,
-    external_gateway_ref, expired_at
+    external_gateway_ref, expired_at, target_pet_id, coral_nickname, include_bio_shield, payment_url, paid_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
@@ -28,8 +28,8 @@ INSERT INTO donations (
     $16, $17, $18, $19,
     $20, $21, $22, $23, $24,
     $25, $26, $27, $28,
-    $29, $30
-) RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at
+    $29, $30, $31, $32, $33, $34, $35
+) RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url
 `
 
 type CreateDonationParams struct {
@@ -63,6 +63,11 @@ type CreateDonationParams struct {
 	PaymentStatus            PaymentStatus      `json:"payment_status"`
 	ExternalGatewayRef       pgtype.Text        `json:"external_gateway_ref"`
 	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
+	TargetPetID              pgtype.UUID        `json:"target_pet_id"`
+	CoralNickname            pgtype.Text        `json:"coral_nickname"`
+	IncludeBioShield         bool               `json:"include_bio_shield"`
+	PaymentUrl               pgtype.Text        `json:"payment_url"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
 }
 
 func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) (Donations, error) {
@@ -97,6 +102,11 @@ func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) 
 		arg.PaymentStatus,
 		arg.ExternalGatewayRef,
 		arg.ExpiredAt,
+		arg.TargetPetID,
+		arg.CoralNickname,
+		arg.IncludeBioShield,
+		arg.PaymentUrl,
+		arg.PaidAt,
 	)
 	var i Donations
 	err := row.Scan(
@@ -132,12 +142,16 @@ func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) 
 		&i.PaidAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.TargetPetID,
+		&i.CoralNickname,
+		&i.IncludeBioShield,
+		&i.PaymentUrl,
 	)
 	return i, err
 }
 
 const getDonationByID = `-- name: GetDonationByID :one
-SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at FROM donations
+SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url FROM donations
 WHERE id = $1
 LIMIT 1
 `
@@ -178,12 +192,16 @@ func (q *Queries) GetDonationByID(ctx context.Context, id uuid.UUID) (Donations,
 		&i.PaidAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.TargetPetID,
+		&i.CoralNickname,
+		&i.IncludeBioShield,
+		&i.PaymentUrl,
 	)
 	return i, err
 }
 
 const getDonationByIdempotencyKey = `-- name: GetDonationByIdempotencyKey :one
-SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at FROM donations
+SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url FROM donations
 WHERE idempotency_key = $1
 LIMIT 1
 `
@@ -224,12 +242,16 @@ func (q *Queries) GetDonationByIdempotencyKey(ctx context.Context, idempotencyKe
 		&i.PaidAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.TargetPetID,
+		&i.CoralNickname,
+		&i.IncludeBioShield,
+		&i.PaymentUrl,
 	)
 	return i, err
 }
 
 const listDonationsByUserID = `-- name: ListDonationsByUserID :many
-SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, cp.title AS project_title
+SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, cp.title AS project_title
 FROM donations d
 JOIN conservation_projects cp ON d.project_id = cp.id
 WHERE d.user_id = $1
@@ -269,6 +291,10 @@ type ListDonationsByUserIDRow struct {
 	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
 	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetPetID              pgtype.UUID        `json:"target_pet_id"`
+	CoralNickname            pgtype.Text        `json:"coral_nickname"`
+	IncludeBioShield         bool               `json:"include_bio_shield"`
+	PaymentUrl               pgtype.Text        `json:"payment_url"`
 	ProjectTitle             string             `json:"project_title"`
 }
 
@@ -314,6 +340,10 @@ func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) (
 			&i.PaidAt,
 			&i.ExpiredAt,
 			&i.CreatedAt,
+			&i.TargetPetID,
+			&i.CoralNickname,
+			&i.IncludeBioShield,
+			&i.PaymentUrl,
 			&i.ProjectTitle,
 		); err != nil {
 			return nil, err
@@ -327,7 +357,7 @@ func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) (
 }
 
 const listDonationsByUserIDWithCursor = `-- name: ListDonationsByUserIDWithCursor :many
-SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, cp.title AS project_title
+SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, cp.title AS project_title
 FROM donations d
 JOIN conservation_projects cp ON d.project_id = cp.id
 WHERE d.user_id = $1
@@ -375,6 +405,10 @@ type ListDonationsByUserIDWithCursorRow struct {
 	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
 	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetPetID              pgtype.UUID        `json:"target_pet_id"`
+	CoralNickname            pgtype.Text        `json:"coral_nickname"`
+	IncludeBioShield         bool               `json:"include_bio_shield"`
+	PaymentUrl               pgtype.Text        `json:"payment_url"`
 	ProjectTitle             string             `json:"project_title"`
 }
 
@@ -420,6 +454,10 @@ func (q *Queries) ListDonationsByUserIDWithCursor(ctx context.Context, arg ListD
 			&i.PaidAt,
 			&i.ExpiredAt,
 			&i.CreatedAt,
+			&i.TargetPetID,
+			&i.CoralNickname,
+			&i.IncludeBioShield,
+			&i.PaymentUrl,
 			&i.ProjectTitle,
 		); err != nil {
 			return nil, err
@@ -433,7 +471,7 @@ func (q *Queries) ListDonationsByUserIDWithCursor(ctx context.Context, arg ListD
 }
 
 const listExpiredPendingDonations = `-- name: ListExpiredPendingDonations :many
-SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at FROM donations
+SELECT id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url FROM donations
 WHERE payment_status = 'pending' AND expired_at < NOW()
 LIMIT $1
 `
@@ -480,6 +518,10 @@ func (q *Queries) ListExpiredPendingDonations(ctx context.Context, limit int32) 
 			&i.PaidAt,
 			&i.ExpiredAt,
 			&i.CreatedAt,
+			&i.TargetPetID,
+			&i.CoralNickname,
+			&i.IncludeBioShield,
+			&i.PaymentUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -496,7 +538,7 @@ UPDATE donations
 SET payment_status = 'expired',
     is_points_locked = false
 WHERE id = $1 AND payment_status = 'pending'
-RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at
+RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url
 `
 
 func (q *Queries) MarkDonationExpired(ctx context.Context, id uuid.UUID) (Donations, error) {
@@ -535,6 +577,10 @@ func (q *Queries) MarkDonationExpired(ctx context.Context, id uuid.UUID) (Donati
 		&i.PaidAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.TargetPetID,
+		&i.CoralNickname,
+		&i.IncludeBioShield,
+		&i.PaymentUrl,
 	)
 	return i, err
 }
@@ -545,7 +591,7 @@ SET payment_status = $2,
     paid_at = $3,
     external_gateway_ref = COALESCE($4, external_gateway_ref)
 WHERE id = $1
-RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at
+RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url
 `
 
 type UpdateDonationPaymentStatusParams struct {
@@ -596,6 +642,10 @@ func (q *Queries) UpdateDonationPaymentStatus(ctx context.Context, arg UpdateDon
 		&i.PaidAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
+		&i.TargetPetID,
+		&i.CoralNickname,
+		&i.IncludeBioShield,
+		&i.PaymentUrl,
 	)
 	return i, err
 }

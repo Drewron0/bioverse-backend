@@ -194,7 +194,10 @@ func (s *Service) ClaimSponsoredQuota(ctx context.Context, quotaID uuid.UUID) (*
 
 // RecordESGBiodiversityMetric records biodiversity indicators for POJK 51/2017 & GRI 101 compliance.
 func (s *Service) RecordESGBiodiversityMetric(ctx context.Context, companyID uuid.UUID, year, quarter int32, indicator, unit string, baseline, current, target decimal.Decimal) (*store.EsgBiodiversityMetrics, error) {
-	variance := current.Sub(baseline).Div(baseline).Mul(decimal.NewFromInt(100)).Round(2)
+	var variance decimal.Decimal
+	if !baseline.IsZero() {
+		variance = current.Sub(baseline).Div(baseline).Mul(decimal.NewFromInt(100)).Round(2)
+	}
 	status := store.ComplianceStatusCompliant
 	if current.LessThan(target) {
 		status = store.ComplianceStatusAtRisk

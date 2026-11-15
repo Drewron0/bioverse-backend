@@ -26,6 +26,10 @@ var (
 	ErrInvalidMilestoneMonth = errors.New("milestone month must be 1, 3, or 6")
 	// ErrPayoutNotFound indicates payout record not found.
 	ErrPayoutNotFound = errors.New("payout record not found")
+	// ErrInvalidPayoutStatusTransition indicates illegal status change.
+	ErrInvalidPayoutStatusTransition = errors.New("invalid payout status transition")
+	// ErrPayoutNotApproved indicates payout cannot be disbursed without prior approval.
+	ErrPayoutNotApproved = errors.New("payout must be approved before disbursement")
 )
 
 // Service provides domain logic for field operations, operator KYC, work logs, and payouts.
@@ -236,55 +240,163 @@ func (s *Service) RecordMediaEvidence(ctx context.Context, in RecordMediaEvidenc
 	return &ev, nil
 }
 
-// CreatePayout creates a settlement payout batch for an operator.
-func (s *Service) CreatePayout(ctx context.Context, operatorID uuid.UUID, periodStart, periodEnd time.Time, grossAmountIDR decimal.Decimal, unitsPlanted, maintenanceTasks int32) (*store.OperatorPayouts, error) {
-	payoutID, _ := uuid.NewV7()
-	idempotencyKey := fmt.Sprintf("payout-%s-%s-%s", operatorID.String(), periodStart.Format("20060102"), periodEnd.Format("20060102"))
+// CreatePayoutInput defines parameters for creating an operator payout batch.
+type CreatePayoutInput struct {
+	IdempotencyKey   string
+	OperatorID       uuid.UUID
+	PeriodStart      time.Time
+	PeriodEnd        time.Time
+	GrossAmountIDR   *decimal.Decimal
+	UnitsPlanted     *int32
+	MaintenanceTasks *int32
+}
 
+// CreatePayout creates a settlement payout batch for an operator, calculating totals from verified work logs if available.
+func (s *Service) CreatePayout(ctx context.Context, operatorID uuid.UUID, periodStart, periodEnd time.Time, grossAmountIDR decimal.Decimal, unitsPlanted, maintenanceTasks int32) (*store.OperatorPayouts, error) {
+	return s.CreatePayoutWithInput(ctx, CreatePayoutInput{
+		OperatorID:       operatorID,
+		PeriodStart:      periodStart,
+		PeriodEnd:        periodEnd,
+		GrossAmountIDR:   &grossAmountIDR,
+		UnitsPlanted:     &unitsPlanted,
+		MaintenanceTasks: &maintenanceTasks,
+	})
+}
+
+// CreatePayoutWithInput calculates and initializes an operator payout batch in draft status with idempotency protection.
+func (s *Service) CreatePayoutWithInput(ctx context.Context, in CreatePayoutInput) (*store.OperatorPayouts, error) {
+	if in.IdempotencyKey == "" {
+		in.IdempotencyKey = fmt.Sprintf("payout-%s-%s-%s", in.OperatorID.String(), in.PeriodStart.Format("20060102"), in.PeriodEnd.Format("20060102"))
+	}
+
+	// Idempotency check: if payout already exists for this idempotency key, return it
+	existing, err := s.store.GetOperatorPayoutByIdempotencyKey(ctx, in.IdempotencyKey)
+	if err == nil {
+		return &existing, nil
+	}
+
+	op, err := s.store.GetFieldOperatorByID(ctx, in.OperatorID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrOperatorNotFound
+		}
+		return nil, fmt.Errorf("failed to query operator: %w", err)
+	}
+
+	startPg := pgtype.Timestamptz{Time: in.PeriodStart, Valid: true}
+	endPg := pgtype.Timestamptz{Time: in.PeriodEnd.Add(23*time.Hour + 59*time.Minute + 59*time.Second), Valid: true}
+
+	summary, err := s.store.GetOperatorVerifiedWorkLogsSummary(ctx, store.GetOperatorVerifiedWorkLogsSummaryParams{
+		OperatorID: in.OperatorID,
+		WorkDate:   startPg,
+		WorkDate_2: endPg,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("failed to calculate work logs summary: %w", err)
+	}
+
+	var unitsPlanted int32
+	var maintenanceTasks int32
+	var grossAmountIDR decimal.Decimal
+
+	if summary.UnitsPlanted > 0 || summary.MaintenanceTasks > 0 {
+		unitsPlanted = summary.UnitsPlanted
+		maintenanceTasks = summary.MaintenanceTasks
+		totalFee := decimalutil.FromNumeric(summary.TotalFeeEarnedIdr)
+		if totalFee.IsPositive() {
+			grossAmountIDR = totalFee
+		} else {
+			plantingRate := decimalutil.FromNumeric(op.RatePerPlantingIdr)
+			maintRate := decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
+			grossAmountIDR = plantingRate.Mul(decimal.NewFromInt(int64(unitsPlanted))).Add(maintRate.Mul(decimal.NewFromInt(int64(maintenanceTasks))))
+		}
+	} else {
+		if in.UnitsPlanted != nil {
+			unitsPlanted = *in.UnitsPlanted
+		}
+		if in.MaintenanceTasks != nil {
+			maintenanceTasks = *in.MaintenanceTasks
+		}
+		if in.GrossAmountIDR != nil {
+			grossAmountIDR = *in.GrossAmountIDR
+		} else {
+			plantingRate := decimalutil.FromNumeric(op.RatePerPlantingIdr)
+			maintRate := decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
+			grossAmountIDR = plantingRate.Mul(decimal.NewFromInt(int64(unitsPlanted))).Add(maintRate.Mul(decimal.NewFromInt(int64(maintenanceTasks))))
+		}
+	}
+
+	payoutID, _ := uuid.NewV7()
 	var createdPayout store.OperatorPayouts
-	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		txStore := store.New(tx)
 
 		p, err := txStore.CreateOperatorPayout(ctx, store.CreateOperatorPayoutParams{
-			ID:                     payoutID,
-			IdempotencyKey:         idempotencyKey,
-			OperatorID:             operatorID,
-			ApprovedByAdminID:      pgtype.UUID{Valid: false},
-			PeriodStart:            pgtype.Date{Time: periodStart, Valid: true},
-			PeriodEnd:              pgtype.Date{Time: periodEnd, Valid: true},
-			TotalUnitsPlanted:      unitsPlanted,
-			TotalMaintenanceTasks:  maintenanceTasks,
-			GrossAmountIdr:         decimalutil.ToNumeric(grossAmountIDR),
-			TransferFeeIdr:         decimalutil.ToNumeric(decimal.Zero),
-			NetDisbursedIdr:        decimalutil.ToNumeric(grossAmountIDR),
-			PayoutGatewayProvider:  "xendit",
-			Status:                 store.PayoutStatusApproved,
+			ID:                    payoutID,
+			IdempotencyKey:        in.IdempotencyKey,
+			OperatorID:            in.OperatorID,
+			ApprovedByAdminID:     pgtype.UUID{Valid: false},
+			PeriodStart:           pgtype.Date{Time: in.PeriodStart, Valid: true},
+			PeriodEnd:             pgtype.Date{Time: in.PeriodEnd, Valid: true},
+			TotalUnitsPlanted:     unitsPlanted,
+			TotalMaintenanceTasks: maintenanceTasks,
+			GrossAmountIdr:        decimalutil.ToNumeric(grossAmountIDR),
+			TransferFeeIdr:        decimalutil.ToNumeric(decimal.Zero),
+			NetDisbursedIdr:       decimalutil.ToNumeric(grossAmountIDR),
+			PayoutGatewayProvider: "xendit",
+			Status:                store.PayoutStatusDraft,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create operator payout: %w", err)
 		}
 
+		_ = txStore.LinkWorkLogsToPayout(ctx, store.LinkWorkLogsToPayoutParams{
+			PayoutID:   pgtype.UUID{Bytes: payoutID, Valid: true},
+			OperatorID: in.OperatorID,
+			WorkDate:   startPg,
+			WorkDate_2: endPg,
+		})
+
 		createdPayout = p
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("payout transaction failed: %w", err)
 	}
 
 	return &createdPayout, nil
 }
 
-// ApprovePayout approves a pending operator payout batch.
-func (s *Service) ApprovePayout(ctx context.Context, payoutID uuid.UUID) (*store.OperatorPayouts, error) {
-	payout, err := s.store.UpdateOperatorPayoutStatus(ctx, store.UpdateOperatorPayoutStatusParams{
-		ID:         payoutID,
-		Status:     store.PayoutStatusApproved,
-		ApprovedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-	})
+// ApprovePayout advances payout status from draft or pending_approval to approved.
+func (s *Service) ApprovePayout(ctx context.Context, payoutID uuid.UUID, adminID *uuid.UUID) (*store.OperatorPayouts, error) {
+	current, err := s.store.GetOperatorPayoutByID(ctx, payoutID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPayoutNotFound
 		}
+		return nil, fmt.Errorf("failed to get operator payout: %w", err)
+	}
+
+	if current.Status == store.PayoutStatusApproved {
+		return &current, nil
+	}
+	if current.Status != store.PayoutStatusDraft && current.Status != store.PayoutStatusPendingApproval {
+		return nil, ErrInvalidPayoutStatusTransition
+	}
+
+	var adminUUID pgtype.UUID
+	if adminID != nil {
+		adminUUID = pgtype.UUID{Bytes: *adminID, Valid: true}
+	}
+
+	now := time.Now().UTC()
+	payout, err := s.store.UpdateOperatorPayoutStatus(ctx, store.UpdateOperatorPayoutStatusParams{
+		ID:                payoutID,
+		Status:            store.PayoutStatusApproved,
+		ApprovedByAdminID: adminUUID,
+		ApprovedAt:        pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to approve operator payout: %w", err)
 	}
 	return &payout, nil
@@ -292,19 +404,32 @@ func (s *Service) ApprovePayout(ctx context.Context, payoutID uuid.UUID) (*store
 
 // DisbursePayout records disbursement execution for an approved payout batch.
 func (s *Service) DisbursePayout(ctx context.Context, payoutID uuid.UUID, externalDisbursementID string) (*store.OperatorPayouts, error) {
-	if externalDisbursementID == "" {
-		externalDisbursementID = fmt.Sprintf("disb-xen-%d", time.Now().UnixNano())
-	}
-	payout, err := s.store.UpdateOperatorPayoutStatus(ctx, store.UpdateOperatorPayoutStatusParams{
-		ID:                     payoutID,
-		Status:                 store.PayoutStatusDisbursed,
-		DisbursedAt:            pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		ExternalDisbursementID: pgtype.Text{String: externalDisbursementID, Valid: true},
-	})
+	current, err := s.store.GetOperatorPayoutByID(ctx, payoutID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPayoutNotFound
 		}
+		return nil, fmt.Errorf("failed to get operator payout: %w", err)
+	}
+
+	if current.Status == store.PayoutStatusDisbursed {
+		return &current, nil
+	}
+	if current.Status != store.PayoutStatusApproved && current.Status != store.PayoutStatusProcessing {
+		return nil, ErrPayoutNotApproved
+	}
+
+	if externalDisbursementID == "" {
+		externalDisbursementID = fmt.Sprintf("disb-xen-%d", time.Now().UnixNano())
+	}
+	now := time.Now().UTC()
+	payout, err := s.store.UpdateOperatorPayoutStatus(ctx, store.UpdateOperatorPayoutStatusParams{
+		ID:                     payoutID,
+		Status:                 store.PayoutStatusDisbursed,
+		DisbursedAt:            pgtype.Timestamptz{Time: now, Valid: true},
+		ExternalDisbursementID: pgtype.Text{String: externalDisbursementID, Valid: true},
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to disburse operator payout: %w", err)
 	}
 	return &payout, nil

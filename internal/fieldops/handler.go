@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Drewron0/bioverse-backend/internal/identity"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/httperr"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/go-chi/chi/v5"
@@ -216,18 +218,46 @@ func (h *Handler) handleRecordMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 type createPayoutRequest struct {
-	OperatorID       uuid.UUID       `json:"operator_id"`
-	PeriodStart      string          `json:"period_start"`
-	PeriodEnd        string          `json:"period_end"`
-	GrossAmountIDR   decimal.Decimal `json:"gross_amount_idr"`
-	UnitsPlanted     int32           `json:"units_planted"`
-	MaintenanceTasks int32           `json:"maintenance_tasks"`
+	OperatorID       uuid.UUID        `json:"operator_id"`
+	PeriodStart      string           `json:"period_start"`
+	PeriodEnd        string           `json:"period_end"`
+	GrossAmountIDR   *decimal.Decimal `json:"gross_amount_idr,omitempty"`
+	UnitsPlanted     *int32           `json:"units_planted,omitempty"`
+	MaintenanceTasks *int32           `json:"maintenance_tasks,omitempty"`
+}
+
+type payoutBatchResponse struct {
+	ID              string `json:"id"`
+	OperatorID      string `json:"operator_id"`
+	GrossAmountIDR  string `json:"gross_amount_idr"`
+	TransferFeeIDR  string `json:"transfer_fee_idr"`
+	NetDisbursedIDR string `json:"net_disbursed_idr"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+}
+
+func toPayoutBatchResponse(p *store.OperatorPayouts) payoutBatchResponse {
+	return payoutBatchResponse{
+		ID:              p.ID.String(),
+		OperatorID:      p.OperatorID.String(),
+		GrossAmountIDR:  decimalutil.FromNumeric(p.GrossAmountIdr).StringFixed(2),
+		TransferFeeIDR:  decimalutil.FromNumeric(p.TransferFeeIdr).StringFixed(2),
+		NetDisbursedIDR: decimalutil.FromNumeric(p.NetDisbursedIdr).StringFixed(2),
+		Status:          string(p.Status),
+		CreatedAt:       p.CreatedAt.Time.Format(time.RFC3339),
+	}
 }
 
 func (h *Handler) handleCreatePayout(w http.ResponseWriter, r *http.Request) {
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+
 	var req createPayoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+	if req.OperatorID == uuid.Nil {
+		httperr.BadRequest(w, r, "operator_id is required", nil)
 		return
 	}
 
@@ -242,13 +272,25 @@ func (h *Handler) handleCreatePayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payout, err := h.service.CreatePayout(r.Context(), req.OperatorID, start, end, req.GrossAmountIDR, req.UnitsPlanted, req.MaintenanceTasks)
+	payout, err := h.service.CreatePayoutWithInput(r.Context(), CreatePayoutInput{
+		IdempotencyKey:   idempotencyKey,
+		OperatorID:       req.OperatorID,
+		PeriodStart:      start,
+		PeriodEnd:        end,
+		GrossAmountIDR:   req.GrossAmountIDR,
+		UnitsPlanted:     req.UnitsPlanted,
+		MaintenanceTasks: req.MaintenanceTasks,
+	})
 	if err != nil {
+		if errors.Is(err, ErrOperatorNotFound) {
+			httperr.NotFound(w, r, "Field operator not found")
+			return
+		}
 		httperr.InternalServerError(w, r)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, payout)
+	writeJSON(w, http.StatusCreated, toPayoutBatchResponse(payout))
 }
 
 func (h *Handler) handleApprovePayout(w http.ResponseWriter, r *http.Request) {
@@ -259,17 +301,26 @@ func (h *Handler) handleApprovePayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payout, err := h.service.ApprovePayout(r.Context(), payoutID)
+	var adminIDPtr *uuid.UUID
+	if adminID, ok := identity.GetAdminIDFromContext(r.Context()); ok {
+		adminIDPtr = &adminID
+	}
+
+	payout, err := h.service.ApprovePayout(r.Context(), payoutID, adminIDPtr)
 	if err != nil {
 		if errors.Is(err, ErrPayoutNotFound) {
 			httperr.NotFound(w, r, "Payout not found")
+			return
+		}
+		if errors.Is(err, ErrInvalidPayoutStatusTransition) {
+			httperr.Conflict(w, r, err.Error())
 			return
 		}
 		httperr.InternalServerError(w, r)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, payout)
+	writeJSON(w, http.StatusOK, toPayoutBatchResponse(payout))
 }
 
 type disbursePayoutRequest struct {
@@ -293,11 +344,15 @@ func (h *Handler) handleDisbursePayout(w http.ResponseWriter, r *http.Request) {
 			httperr.NotFound(w, r, "Payout not found")
 			return
 		}
+		if errors.Is(err, ErrPayoutNotApproved) {
+			httperr.Conflict(w, r, err.Error())
+			return
+		}
 		httperr.InternalServerError(w, r)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, payout)
+	writeJSON(w, http.StatusOK, toPayoutBatchResponse(payout))
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

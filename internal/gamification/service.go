@@ -18,6 +18,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
@@ -538,6 +539,10 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 		return nil
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrMissionAlreadyCompletedToday
+		}
 		return nil, err
 	}
 

@@ -1917,6 +1917,10 @@ type Donations struct {
 	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
 	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetPetID              pgtype.UUID        `json:"target_pet_id"`
+	CoralNickname            pgtype.Text        `json:"coral_nickname"`
+	IncludeBioShield         bool               `json:"include_bio_shield"`
+	PaymentUrl               pgtype.Text        `json:"payment_url"`
 }
 
 type EcoMissions struct {

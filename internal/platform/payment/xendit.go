@@ -127,13 +127,11 @@ func (c *XenditClient) CreateInvoice(ctx context.Context, externalID string, amo
 	c.logger.Info("xendit invoice created", slog.String("id", res.ID), slog.String("external_id", externalID))
 
 	return &InvoiceResult{
-		ID:          res.ID,
-		ExternalID:  res.ExternalID,
-		InvoiceURL:  res.InvoiceURL,
-		Status:      res.Status,
-		Amount:      res.Amount,
-		ExpiredAt:   expiry,
-		QRISPayload: "00020101021226610014ID.XENDIT.WWW01189360091800000000005204581253033605802ID5914BioVerse Xendit6007Jakarta6304C14A",
-		VANumber:    "8808" + res.ID[:min(len(res.ID), 10)],
+		ID:         res.ID,
+		ExternalID: res.ExternalID,
+		InvoiceURL: res.InvoiceURL,
+		Status:     res.Status,
+		Amount:     res.Amount,
+		ExpiredAt:  expiry,
 	}, nil
 }

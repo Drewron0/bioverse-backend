@@ -70,6 +70,15 @@ func TestFieldOpsEndToEnd(t *testing.T) {
 		t.Errorf("expected NIK to be encrypted in database")
 	}
 
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM operator_payouts WHERE operator_id = $1", op.ID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM operator_work_logs WHERE operator_id = $1", op.ID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM media_evidences WHERE project_id = $1", projectID)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM field_operators WHERE id = $1", op.ID)
+	})
+
 	// 2. Invariant Test: Duplicate NIK registration MUST fail with ErrDuplicateNIK
 	_, err = fieldSvc.RegisterOperator(ctx, fieldops.RegisterOperatorInput{
 		ZoneID:       zoneID,
@@ -132,15 +141,45 @@ func TestFieldOpsEndToEnd(t *testing.T) {
 		t.Errorf("expected milestone month 1, got %v", media.MilestoneMonth)
 	}
 
-	// 6. Create payout batch for operator
+	// 6. Create payout batch for operator in draft status
 	start := time.Now().UTC().AddDate(0, 0, -7)
 	end := time.Now().UTC()
 	payout, err := fieldSvc.CreatePayout(ctx, op.ID, start, end, decimal.NewFromInt(150000), 10, 0)
 	if err != nil {
 		t.Fatalf("failed to create payout: %v", err)
 	}
-	if payout.Status != store.PayoutStatusApproved {
-		t.Errorf("expected payout status approved, got %v", payout.Status)
+	if payout.Status != store.PayoutStatusDraft {
+		t.Errorf("expected payout status draft, got %v", payout.Status)
+	}
+
+	// Invariant Test: Disbursing a draft payout must fail
+	_, err = fieldSvc.DisbursePayout(ctx, payout.ID, "disb_early_test")
+	if err != fieldops.ErrPayoutNotApproved {
+		t.Fatalf("expected ErrPayoutNotApproved when disbursing draft, got %v", err)
+	}
+
+	// 7. Approve payout
+	approvedPayout, err := fieldSvc.ApprovePayout(ctx, payout.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to approve payout: %v", err)
+	}
+	if approvedPayout.Status != store.PayoutStatusApproved {
+		t.Errorf("expected payout status approved, got %v", approvedPayout.Status)
+	}
+
+	// 8. Disburse payout
+	disbursedPayout, err := fieldSvc.DisbursePayout(ctx, payout.ID, fmt.Sprintf("disb_test_%d", uniqueSuffix))
+	if err != nil {
+		t.Fatalf("failed to disburse payout: %v", err)
+	}
+	if disbursedPayout.Status != store.PayoutStatusDisbursed {
+		t.Errorf("expected payout status disbursed, got %v", disbursedPayout.Status)
+	}
+
+	// Invariant Test: Re-approving disbursed payout must fail
+	_, err = fieldSvc.ApprovePayout(ctx, payout.ID, nil)
+	if err != fieldops.ErrInvalidPayoutStatusTransition {
+		t.Fatalf("expected ErrInvalidPayoutStatusTransition, got %v", err)
 	}
 
 	t.Logf("Fieldops KYC, work log, media milestone, and payout invariants verified for operator %s", op.ID)

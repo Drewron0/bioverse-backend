@@ -69,6 +69,7 @@ type DonationResult struct {
 	VANumber           string
 	BankCode           string
 	PaymentStatus      store.PaymentStatus
+	PaymentURL         string
 	ExpiredAt          time.Time
 }
 
@@ -97,7 +98,7 @@ func NewService(pool *pgxpool.Pool, q store.Querier, consSvc *conservation.Servi
 	}
 }
 
-// Checkout creates a pending donation, locks points, and generates payment simulation details.
+// Checkout creates a pending donation or immediately finalizes points-only checkouts.
 func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResult, error) {
 	if in.UnitQuantity <= 0 {
 		return nil, errors.New("unit quantity must be at least 1")
@@ -114,6 +115,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		return &DonationResult{
 			DonationID:         existingDonation.ID,
 			IdempotencyKey:     existingDonation.IdempotencyKey,
+			DonationType:       existingDonation.DonationType,
 			GrossProjectValue:  decimalutil.FromNumeric(existingDonation.GrossProjectValue),
 			MoneyAmountPaid:    decimalutil.FromNumeric(existingDonation.MoneyAmountPaid),
 			CurrencyCode:       existingDonation.CurrencyCode,
@@ -126,6 +128,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			VANumber:           existingDonation.VaNumber.String,
 			BankCode:           existingDonation.BankCode.String,
 			PaymentStatus:      existingDonation.PaymentStatus,
+			PaymentURL:         existingDonation.PaymentUrl.String,
 			ExpiredAt:          existingDonation.ExpiredAt.Time,
 		}, nil
 	}
@@ -138,6 +141,8 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	var grossValue decimal.Decimal
 	var projectID uuid.UUID
 	var projectTitle string
+	var projectZoneID uuid.UUID
+	var projectSpecies string
 
 	if donationType == store.DonationTypeBioShieldAddon {
 		activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
@@ -151,10 +156,20 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 
 		if in.ProjectID != nil {
 			projectID = *in.ProjectID
+			p, err := s.store.GetConservationProjectByID(ctx, projectID)
+			if err == nil {
+				projectZoneID = p.ZoneID
+				projectSpecies = p.SpeciesOrTypeName
+			}
 		} else {
 			myCorals, _ := s.store.ListCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
 			if len(myCorals) > 0 {
 				projectID = myCorals[0].ProjectID
+				p, err := s.store.GetConservationProjectByID(ctx, projectID)
+				if err == nil {
+					projectZoneID = p.ZoneID
+					projectSpecies = p.SpeciesOrTypeName
+				}
 			}
 		}
 		projectTitle = "Bio-Shield XP Protection Add-on"
@@ -169,6 +184,8 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			return nil, fmt.Errorf("invalid conservation project: %w", err)
 		}
 		projectTitle = project.Title
+		projectZoneID = project.ZoneID
+		projectSpecies = project.SpeciesOrTypeName
 
 		if in.IncludeBioShield {
 			activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
@@ -208,18 +225,30 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	settlementAmount := moneyAmountPaid.Mul(exchangeRate).Round(0)
 
 	donationID, _ := uuid.NewV7()
-	expiredAt := time.Now().UTC().Add(24 * time.Hour)
+	now := time.Now().UTC()
+	expiredAt := now.Add(24 * time.Hour)
 
 	var qrisPayload string
 	var vaNumber string
 	var bankCode string
 	var externalRef string
+	var paymentURL string
 
-	if moneyAmountPaid.IsPositive() {
-		user, _ := s.store.GetUserByID(ctx, in.UserID)
-		inv, err := s.gateway.CreateInvoice(ctx, donationID.String(), settlementAmount, fmt.Sprintf("BioVerse: %s", projectTitle), user.Email)
-		if err == nil && inv != nil {
+	isPointsOnly := moneyAmountPaid.IsZero()
+
+	if !isPointsOnly {
+		user, err := s.store.GetUserByID(ctx, in.UserID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user: %w", err)
+		}
+		externalID := fmt.Sprintf("donation_%s", donationID)
+		inv, err := s.gateway.CreateInvoice(ctx, externalID, settlementAmount, fmt.Sprintf("BioVerse: %s", projectTitle), user.Email)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create payment invoice: %w", err)
+		}
+		if inv != nil {
 			externalRef = inv.ID
+			paymentURL = inv.InvoiceURL
 			if inv.QRISPayload != "" {
 				qrisPayload = inv.QRISPayload
 			}
@@ -228,18 +257,21 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 				bankCode = "MANDIRI"
 			}
 		}
+	} else {
+		externalRef = "POINTS-PAID"
 	}
 
-	if qrisPayload == "" && in.PaymentMethod == store.PaymentMethodTypeQris {
-		qrisPayload = fmt.Sprintf("00020101021226580016ID.CO.XENDIT.WWW01189360091800000000005204581253033605802ID5914BIOVERSE REEF6007DENPASAR62070703A016304%s", donationID.String()[:4])
+	var targetPetUUID pgtype.UUID
+	if in.TargetPetID != nil {
+		targetPetUUID = pgtype.UUID{Bytes: *in.TargetPetID, Valid: true}
 	}
-	if vaNumber == "" && in.PaymentMethod != store.PaymentMethodTypeQris {
-		bankCode = "MANDIRI"
-		vaNumber = fmt.Sprintf("88908%d", time.Now().Unix()%100000000)
+	var coralNicknameText pgtype.Text
+	if in.CoralNickname != "" {
+		coralNicknameText = pgtype.Text{String: in.CoralNickname, Valid: true}
 	}
-
-	if in.IncludeBioShield {
-		donationType = store.DonationTypeBioShieldAddon
+	var paymentURLText pgtype.Text
+	if paymentURL != "" {
+		paymentURLText = pgtype.Text{String: paymentURL, Valid: true}
 	}
 
 	var createdDonation store.Donations
@@ -247,29 +279,66 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		txStore := store.New(tx)
 
-		if in.PointsToUse > 0 {
-			_, err := txStore.LockUserPoints(ctx, store.LockUserPointsParams{
-				ID:                  in.UserID,
-				LockedPointsBalance: in.PointsToUse,
-			})
-			if err != nil {
-				return ErrInsufficientPoints
-			}
+		if isPointsOnly {
+			// Points-only donation: spend points directly and immediately fulfill
+			if in.PointsToUse > 0 {
+				_, err := txStore.LockUserPoints(ctx, store.LockUserPointsParams{
+					ID:                  in.UserID,
+					LockedPointsBalance: in.PointsToUse,
+				})
+				if err != nil {
+					return ErrInsufficientPoints
+				}
 
-			ledgerID, _ := uuid.NewV7()
-			user, _ := txStore.GetUserByID(ctx, in.UserID)
-			_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
-				ID:              ledgerID,
-				UserID:          in.UserID,
-				TransactionType: store.PointTxTypeLockDonation,
-				Amount:          in.PointsToUse,
-				BalanceAfter:    user.PointsBalance,
-				ReferenceType:   "donations",
-				ReferenceID:     donationID,
-				Description:     "Lock points for pending donation checkout",
-			})
-			if err != nil {
-				return fmt.Errorf("failed to record point lock ledger: %w", err)
+				user, err := txStore.SpendUserPoints(ctx, store.SpendUserPointsParams{
+					ID:            in.UserID,
+					PointsBalance: in.PointsToUse,
+				})
+				if err != nil {
+					return ErrInsufficientPoints
+				}
+
+				ledgerID, _ := uuid.NewV7()
+				_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
+					ID:              ledgerID,
+					UserID:          in.UserID,
+					TransactionType: store.PointTxTypeSpendDonation,
+					Amount:          -in.PointsToUse,
+					BalanceAfter:    user.PointsBalance,
+					ReferenceType:   "donations",
+					ReferenceID:     donationID,
+					Description:     "Spent points on direct donation checkout",
+				})
+				if err != nil {
+					return fmt.Errorf("failed to record point spend ledger: %w", err)
+				}
+			}
+		} else {
+			// Gateway payment required: lock points pending payment
+			if in.PointsToUse > 0 {
+				_, err := txStore.LockUserPoints(ctx, store.LockUserPointsParams{
+					ID:                  in.UserID,
+					LockedPointsBalance: in.PointsToUse,
+				})
+				if err != nil {
+					return ErrInsufficientPoints
+				}
+
+				ledgerID, _ := uuid.NewV7()
+				user, _ := txStore.GetUserByID(ctx, in.UserID)
+				_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
+					ID:              ledgerID,
+					UserID:          in.UserID,
+					TransactionType: store.PointTxTypeLockDonation,
+					Amount:          in.PointsToUse,
+					BalanceAfter:    user.PointsBalance,
+					ReferenceType:   "donations",
+					ReferenceID:     donationID,
+					Description:     "Lock points for pending donation checkout",
+				})
+				if err != nil {
+					return fmt.Errorf("failed to record point lock ledger: %w", err)
+				}
 			}
 		}
 
@@ -278,11 +347,21 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			sponsoredQuotaUUID = pgtype.UUID{Bytes: *in.SponsoredQuotaID, Valid: true}
 		}
 
+		paymentStatus := store.PaymentStatusPending
+		var paidAt pgtype.Timestamptz
+		if isPointsOnly {
+			paymentStatus = store.PaymentStatusPaid
+			paidAt = pgtype.Timestamptz{Time: now, Valid: true}
+		}
+
 		d, err := txStore.CreateDonation(ctx, store.CreateDonationParams{
 			ID:                       donationID,
 			IdempotencyKey:           in.IdempotencyKey,
 			UserID:                   in.UserID,
 			ProjectID:                projectID,
+			SubscriptionID:           pgtype.UUID{Valid: false},
+			SponsoredQuotaID:         sponsoredQuotaUUID,
+			CycleNumber:              pgtype.Int4{Valid: false},
 			DonationType:             donationType,
 			IsAnonymous:              in.IsAnonymous,
 			UnitQuantity:             int32(in.UnitQuantity),
@@ -302,15 +381,56 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 			PointsUsed:               in.PointsToUse,
 			PointsRateSnapshot:       decimalutil.ToNumeric(pointsRate),
 			PointsMonetaryEquivalent: decimalutil.ToNumeric(pointsDiscount),
-			IsPointsLocked:           in.PointsToUse > 0,
-			PaymentStatus:            store.PaymentStatusPending,
+			IsPointsLocked:           !isPointsOnly && in.PointsToUse > 0,
+			PaymentStatus:            paymentStatus,
 			ExternalGatewayRef:       pgtype.Text{String: externalRef, Valid: externalRef != ""},
 			ExpiredAt:                pgtype.Timestamptz{Time: expiredAt, Valid: true},
-			SponsoredQuotaID:         sponsoredQuotaUUID,
+			TargetPetID:              targetPetUUID,
+			CoralNickname:            coralNicknameText,
+			IncludeBioShield:         in.IncludeBioShield,
+			PaymentUrl:               paymentURLText,
+			PaidAt:                   paidAt,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to insert donation record: %w", err)
 		}
+
+		if isPointsOnly {
+			// Fulfill adoption: allocate coral fragments if coral_adoption
+			if donationType == store.DonationTypeCoralAdoption {
+				_, err = s.conservationService.AllocateFragments(
+					ctx,
+					tx,
+					projectZoneID,
+					projectID,
+					in.UserID,
+					donationID,
+					in.UnitQuantity,
+					projectSpecies,
+					in.CoralNickname,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to allocate coral fragments to spider frame: %w", err)
+				}
+			}
+
+			// Fulfill Bio-Shield boost if requested
+			if (in.IncludeBioShield || donationType == store.DonationTypeBioShieldAddon) && in.TargetPetID != nil {
+				boostID, _ := uuid.NewV7()
+				_, err = txStore.CreatePetBoost(ctx, store.CreatePetBoostParams{
+					ID:           boostID,
+					UserID:       in.UserID,
+					PetID:        *in.TargetPetID,
+					DonationID:   pgtype.UUID{Bytes: donationID, Valid: true},
+					BoostType:    store.PetBoostTypeBioShieldXp,
+					XpMultiplier: decimalutil.ToNumeric(decimal.NewFromFloat(1.25)),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to apply bio-shield boost to pet: %w", err)
+				}
+			}
+		}
+
 		createdDonation = d
 		return nil
 	})
@@ -335,6 +455,7 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		VANumber:           vaNumber,
 		BankCode:           bankCode,
 		PaymentStatus:      createdDonation.PaymentStatus,
+		PaymentURL:         paymentURL,
 		ExpiredAt:          expiredAt,
 	}, nil
 }
@@ -352,6 +473,16 @@ func (s *Service) ProcessPaidDonation(ctx context.Context, donationID uuid.UUID,
 	project, err := s.store.GetConservationProjectByID(ctx, donation.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
+	effectivePetID := targetPetID
+	if effectivePetID == nil && donation.TargetPetID.Valid {
+		petID := uuid.UUID(donation.TargetPetID.Bytes)
+		effectivePetID = &petID
+	}
+	effectiveNickname := coralNickname
+	if effectiveNickname == "" && donation.CoralNickname.Valid {
+		effectiveNickname = donation.CoralNickname.String
 	}
 
 	now := time.Now().UTC()
@@ -396,27 +527,29 @@ func (s *Service) ProcessPaidDonation(ctx context.Context, donationID uuid.UUID,
 			}
 		}
 
-		_, err = s.conservationService.AllocateFragments(
-			ctx,
-			tx,
-			project.ZoneID,
-			project.ID,
-			donation.UserID,
-			donationID,
-			int(donation.UnitQuantity),
-			project.SpeciesOrTypeName,
-			coralNickname,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to allocate coral fragments to spider frame: %w", err)
+		if donation.DonationType == store.DonationTypeCoralAdoption {
+			_, err = s.conservationService.AllocateFragments(
+				ctx,
+				tx,
+				project.ZoneID,
+				project.ID,
+				donation.UserID,
+				donationID,
+				int(donation.UnitQuantity),
+				project.SpeciesOrTypeName,
+				effectiveNickname,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to allocate coral fragments to spider frame: %w", err)
+			}
 		}
 
-		if donation.DonationType == store.DonationTypeBioShieldAddon && targetPetID != nil {
+		if (donation.IncludeBioShield || donation.DonationType == store.DonationTypeBioShieldAddon) && effectivePetID != nil {
 			boostID, _ := uuid.NewV7()
 			_, err = txStore.CreatePetBoost(ctx, store.CreatePetBoostParams{
 				ID:           boostID,
 				UserID:       donation.UserID,
-				PetID:        *targetPetID,
+				PetID:        *effectivePetID,
 				DonationID:   pgtype.UUID{Bytes: donationID, Valid: true},
 				BoostType:    store.PetBoostTypeBioShieldXp,
 				XpMultiplier: decimalutil.ToNumeric(decimal.NewFromFloat(1.25)),
@@ -485,14 +618,17 @@ func (s *Service) ListUserDonationsWithCursor(ctx context.Context, userID uuid.U
 
 // ProcessXenditInvoiceWebhook handles idempotency deduplication via webhook_events, strict IDR settlement nominal verification, and atomic state transition in a single transaction.
 func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEventID, externalID, status string, amount decimal.Decimal, rawPayload []byte) error {
-	if !strings.HasPrefix(externalID, "donation_") {
-		return nil
+	var donationIDStr string
+	if strings.HasPrefix(externalID, "donation_") {
+		donationIDStr = strings.TrimPrefix(externalID, "donation_")
+	} else {
+		donationIDStr = externalID
 	}
 
-	donationIDStr := strings.TrimPrefix(externalID, "donation_")
 	donationID, err := uuid.Parse(donationIDStr)
 	if err != nil {
-		return fmt.Errorf("invalid donation UUID in external_id: %w", err)
+		// Not a valid donation UUID; ignore without failing Xendit
+		return nil
 	}
 
 	if externalEventID == "" {
@@ -619,19 +755,40 @@ func (s *Service) ProcessXenditInvoiceWebhook(ctx context.Context, externalEvent
 			return fmt.Errorf("failed to get conservation project: %w", err)
 		}
 
-		_, err = s.conservationService.AllocateFragments(
-			ctx,
-			tx,
-			project.ZoneID,
-			project.ID,
-			donation.UserID,
-			donationID,
-			int(donation.UnitQuantity),
-			project.SpeciesOrTypeName,
-			"",
-		)
-		if err != nil {
-			return fmt.Errorf("failed to allocate fragments: %w", err)
+		if donation.DonationType == store.DonationTypeCoralAdoption {
+			var coralNickname string
+			if donation.CoralNickname.Valid {
+				coralNickname = donation.CoralNickname.String
+			}
+			_, err = s.conservationService.AllocateFragments(
+				ctx,
+				tx,
+				project.ZoneID,
+				project.ID,
+				donation.UserID,
+				donationID,
+				int(donation.UnitQuantity),
+				project.SpeciesOrTypeName,
+				coralNickname,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to allocate fragments: %w", err)
+			}
+		}
+
+		if (donation.IncludeBioShield || donation.DonationType == store.DonationTypeBioShieldAddon) && donation.TargetPetID.Valid {
+			boostID, _ := uuid.NewV7()
+			_, err = txStore.CreatePetBoost(ctx, store.CreatePetBoostParams{
+				ID:           boostID,
+				UserID:       donation.UserID,
+				PetID:        donation.TargetPetID.Bytes,
+				DonationID:   pgtype.UUID{Bytes: donationID, Valid: true},
+				BoostType:    store.PetBoostTypeBioShieldXp,
+				XpMultiplier: decimalutil.ToNumeric(decimal.NewFromFloat(1.25)),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to apply bio-shield boost to pet: %w", err)
+			}
 		}
 
 		// 5. Mark webhook event processed in the exact same transaction

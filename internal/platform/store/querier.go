@@ -60,6 +60,8 @@ type Querier interface {
 	GetMissionSubmissionByID(ctx context.Context, arg GetMissionSubmissionByIDParams) (UserMissionSubmissions, error)
 	GetOpenSpiderFrameForZone(ctx context.Context, zoneID uuid.UUID) (GetOpenSpiderFrameForZoneRow, error)
 	GetOperatorPayoutByID(ctx context.Context, id uuid.UUID) (OperatorPayouts, error)
+	GetOperatorPayoutByIdempotencyKey(ctx context.Context, idempotencyKey string) (OperatorPayouts, error)
+	GetOperatorVerifiedWorkLogsSummary(ctx context.Context, arg GetOperatorVerifiedWorkLogsSummaryParams) (GetOperatorVerifiedWorkLogsSummaryRow, error)
 	GetPlatformAdminByEmail(ctx context.Context, email string) (PlatformAdmins, error)
 	GetPlatformAdminByID(ctx context.Context, id uuid.UUID) (PlatformAdmins, error)
 	GetPlatformImpactSummary(ctx context.Context) (GetPlatformImpactSummaryRow, error)
@@ -75,6 +77,7 @@ type Querier interface {
 	GetWebhookEventByProviderAndExternalID(ctx context.Context, arg GetWebhookEventByProviderAndExternalIDParams) (WebhookEvents, error)
 	IncrementProjectFundedUnits(ctx context.Context, arg IncrementProjectFundedUnitsParams) (IncrementProjectFundedUnitsRow, error)
 	IncrementSpiderFrameFragmentsPlanted(ctx context.Context, arg IncrementSpiderFrameFragmentsPlantedParams) (IncrementSpiderFrameFragmentsPlantedRow, error)
+	LinkWorkLogsToPayout(ctx context.Context, arg LinkWorkLogsToPayoutParams) error
 	ListActiveB2BPackages(ctx context.Context) ([]B2bPackages, error)
 	ListActiveCurrencies(ctx context.Context) ([]Currencies, error)
 	ListActiveDigitalProducts(ctx context.Context, currencyCode string) ([]ListActiveDigitalProductsRow, error)
