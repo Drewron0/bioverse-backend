@@ -438,8 +438,10 @@ type leaderboardEntryResponse struct {
 func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
+	cursor := r.URL.Query().Get("cursor")
+	period := r.URL.Query().Get("period")
 
-	limit := int32(10)
+	limit := int32(50)
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		if l > 50 {
 			limit = 50
@@ -450,9 +452,11 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 	offset := int32(0)
 	if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
 		offset = int32(o)
+	} else if c, err := strconv.Atoi(cursor); err == nil && c >= 0 {
+		offset = int32(c)
 	}
 
-	board, err := h.service.GetLeaderboard(r.Context(), limit, offset)
+	board, err := h.service.GetLeaderboard(r.Context(), limit, offset, period)
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return
@@ -486,9 +490,15 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	var nextCursor *string
+	if int32(len(rankings)) == limit {
+		nc := strconv.Itoa(int(offset + limit))
+		nextCursor = &nc
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"rankings":    rankings,
-		"next_cursor": nil,
+		"next_cursor": nextCursor,
 	})
 }
 

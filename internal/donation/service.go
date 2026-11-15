@@ -340,6 +340,9 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		if inv != nil {
 			externalRef = inv.ID
 			paymentURL = inv.InvoiceURL
+			if !inv.ExpiredAt.IsZero() {
+				expiredAt = inv.ExpiredAt
+			}
 			if inv.QRISPayload != "" {
 				qrisPayload = inv.QRISPayload
 			}

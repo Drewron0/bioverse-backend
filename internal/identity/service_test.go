@@ -2,15 +2,17 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/config"
+	"github.com/Drewron0/bioverse-backend/internal/platform/crypto"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"google.golang.org/api/idtoken"
 )
 
 func TestIdentityEndToEndFlow(t *testing.T) {
@@ -173,29 +175,74 @@ func TestIdentityEndToEndFlow(t *testing.T) {
 		t.Errorf("expected PhoneNumber %s, got %v", newPhone, updatedProfile.PhoneNumber)
 	}
 
-	// 10. Verify Google Login rejects raw email injection & invalid tokens
+	// 10. Verify Google Login rejects raw email injection and unverified/forged signatures
 	_, err = service.LoginWithGoogle(ctx, "victim@example.com", "TestDevice")
 	if err == nil {
 		t.Fatal("expected LoginWithGoogle to reject raw email string")
 	}
 
-	// Test valid Google JWT structure
-	claims := jwt.MapClaims{
-		"iss":            "accounts.google.com",
-		"aud":            cfg.OAuth.GoogleClientID,
-		"exp":            time.Now().Add(time.Hour).Unix(),
-		"email":          fmt.Sprintf("google_%d@bioverse.id", time.Now().UnixNano()),
-		"email_verified": true,
-		"name":           "Google Test User",
+	forgedToken := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhY2NvdW50cy5nb29nbGUuY29tIiwiZW1haWwiOiJ2aWN0aW1AZ21haWwuY29tIiwiZXhwIjoyMDAwMDAwMDAwfQ.invalid-signature"
+	_, err = service.LoginWithGoogle(ctx, forgedToken, "TestDevice")
+	if err == nil {
+		t.Fatal("expected LoginWithGoogle to reject forged token with invalid signature")
 	}
-	rawToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, _ := rawToken.SignedString([]byte("any-dummy-test-key"))
 
-	gResult, err := service.LoginWithGoogle(ctx, signedToken, "TestDevice")
+	// 11. Verify verified Google token payload succeeds with authentic verifier
+	testGoogleEmail := fmt.Sprintf("google_%d@bioverse.id", time.Now().UnixNano())
+	service.SetGoogleTokenVerifier(func(ctx context.Context, idToken, audience string) (*idtoken.Payload, error) {
+		if idToken != "valid-test-google-id-token" {
+			return nil, errors.New("invalid token")
+		}
+		return &idtoken.Payload{
+			Issuer:   "https://accounts.google.com",
+			Audience: audience,
+			Expires:  time.Now().Add(time.Hour).Unix(),
+			Subject:  "1234567890",
+			Claims: map[string]interface{}{
+				"email":          testGoogleEmail,
+				"email_verified": true,
+				"name":           "Google Test User",
+			},
+		}, nil
+	})
+
+	gResult, err := service.LoginWithGoogle(ctx, "valid-test-google-id-token", "TestDevice")
 	if err != nil {
-		t.Fatalf("expected valid Google JWT to succeed: %v", err)
+		t.Fatalf("expected valid verified Google ID token to succeed: %v", err)
 	}
 	if gResult.AccessToken == "" {
 		t.Fatal("expected access token from google login")
+	}
+	if gResult.User.Email != testGoogleEmail {
+		t.Errorf("expected email %s, got %s", testGoogleEmail, gResult.User.Email)
+	}
+
+	// 12. Verify Admin MFA re-setup guard (cannot overwrite once enabled)
+	adminID, _ := uuid.NewV7()
+	adminHash, _ := crypto.HashPassword("AdminP@ss1234!")
+	_, err = pool.Exec(ctx,
+		"INSERT INTO platform_admins (id, full_name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)",
+		adminID, "Test Admin MFA", fmt.Sprintf("admin_mfa_%d@bioverse.id", time.Now().UnixNano()), adminHash, store.AdminRoleSuperAdmin,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert test admin: %v", err)
+	}
+
+	mfaSetup1, err := service.AdminSetupMFA(ctx, adminID)
+	if err != nil {
+		t.Fatalf("first MFA setup failed: %v", err)
+	}
+	totpCode, err := crypto.GenerateTOTPCode(mfaSetup1.Secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("failed to generate TOTP code: %v", err)
+	}
+	if err := service.AdminVerifyMFA(ctx, adminID, totpCode); err != nil {
+		t.Fatalf("MFA verify failed: %v", err)
+	}
+
+	// Now attempting setup again must fail
+	_, err = service.AdminSetupMFA(ctx, adminID)
+	if err == nil {
+		t.Fatal("expected AdminSetupMFA to reject setup when MFA is already enabled")
 	}
 }

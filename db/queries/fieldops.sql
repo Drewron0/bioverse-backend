@@ -101,7 +101,7 @@ SET status = $2,
     disbursed_at = COALESCE(sqlc.narg('disbursed_at'), disbursed_at),
     external_disbursement_id = COALESCE(sqlc.narg('external_disbursement_id'), external_disbursement_id),
     failure_reason = COALESCE(sqlc.narg('failure_reason'), failure_reason)
-WHERE id = $1
+WHERE id = $1 AND (sqlc.narg('expected_status')::payout_status IS NULL OR status = sqlc.narg('expected_status'))
 RETURNING *;
 
 -- name: GetOperatorPayoutByIdempotencyKey :one

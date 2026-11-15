@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/identity"
@@ -120,9 +121,11 @@ type registerOperatorRequest struct {
 	Email                 string             `json:"email"`
 	OperatorRole          store.OperatorRole `json:"operator_role"`
 	NIK                   string             `json:"nik"`
+	NationalIDNIK         string             `json:"national_id_nik,omitempty"`
 	BankCode              string             `json:"bank_code"`
 	BankAccountNumber     string             `json:"bank_account_number"`
 	BankAccountHolder     string             `json:"bank_account_holder"`
+	BankAccountHolderName string             `json:"bank_account_holder_name,omitempty"`
 	RatePerPlantingIDR    decimal.Decimal    `json:"rate_per_planting_idr"`
 	RatePerMaintenanceIDR decimal.Decimal    `json:"rate_per_maintenance_idr"`
 }
@@ -133,8 +136,17 @@ func (h *Handler) handleRegisterOperator(w http.ResponseWriter, r *http.Request)
 		httperr.BadRequest(w, r, "Invalid request body", nil)
 		return
 	}
-	if req.FullName == "" || req.NIK == "" || req.PhoneNumber == "" {
-		httperr.BadRequest(w, r, "full_name, nik, and phone_number are required", nil)
+	nik := strings.TrimSpace(req.NationalIDNIK)
+	if nik == "" {
+		nik = strings.TrimSpace(req.NIK)
+	}
+	holder := strings.TrimSpace(req.BankAccountHolderName)
+	if holder == "" {
+		holder = strings.TrimSpace(req.BankAccountHolder)
+	}
+
+	if req.FullName == "" || nik == "" || req.PhoneNumber == "" {
+		httperr.BadRequest(w, r, "full_name, national_id_nik, and phone_number are required", nil)
 		return
 	}
 
@@ -145,10 +157,10 @@ func (h *Handler) handleRegisterOperator(w http.ResponseWriter, r *http.Request)
 		PhoneNumber:           req.PhoneNumber,
 		Email:                 req.Email,
 		OperatorRole:          req.OperatorRole,
-		NIK:                   req.NIK,
+		NIK:                   nik,
 		BankCode:              req.BankCode,
 		BankAccountNumber:     req.BankAccountNumber,
-		BankAccountHolder:     req.BankAccountHolder,
+		BankAccountHolder:     holder,
 		RatePerPlantingIDR:    req.RatePerPlantingIDR,
 		RatePerMaintenanceIDR: req.RatePerMaintenanceIDR,
 	})
@@ -194,6 +206,7 @@ type recordWorkLogRequest struct {
 	UnitsCompleted  int32                  `json:"units_completed"`
 	FeeEarnedIDR    decimal.Decimal        `json:"fee_earned_idr"`
 	ProofImageURL   string                 `json:"proof_image_url"`
+	ProofObjectKey  string                 `json:"proof_object_key,omitempty"`
 	WorkDate        *time.Time             `json:"work_date,omitempty"`
 }
 
@@ -203,8 +216,13 @@ func (h *Handler) handleRecordWorkLog(w http.ResponseWriter, r *http.Request) {
 		httperr.BadRequest(w, r, "Invalid request body", nil)
 		return
 	}
-	if req.OperatorID == uuid.Nil || req.ProjectID == uuid.Nil || req.ProofImageURL == "" {
-		httperr.BadRequest(w, r, "operator_id, project_id, and proof_image_url are required", nil)
+	proofKey := strings.TrimSpace(req.ProofObjectKey)
+	if proofKey == "" {
+		proofKey = strings.TrimSpace(req.ProofImageURL)
+	}
+
+	if req.OperatorID == uuid.Nil || req.ProjectID == uuid.Nil || proofKey == "" {
+		httperr.BadRequest(w, r, "operator_id, project_id, and proof_object_key are required", nil)
 		return
 	}
 
@@ -221,7 +239,7 @@ func (h *Handler) handleRecordWorkLog(w http.ResponseWriter, r *http.Request) {
 		TaskType:        req.TaskType,
 		UnitsCompleted:  req.UnitsCompleted,
 		FeeEarnedIDR:    req.FeeEarnedIDR,
-		ProofImageURL:   req.ProofImageURL,
+		ProofImageURL:   proofKey,
 		WorkDate:        workDate,
 	})
 	if err != nil {

@@ -277,13 +277,13 @@ func (s *Service) ListESGAuditReports(ctx context.Context, companyID uuid.UUID) 
 
 // CorporateDashboardDTO provides an overview of adoption targets and impact for corporate partners.
 type CorporateDashboardDTO struct {
-	CompanyID            string `json:"company_id"`
-	LegalName            string `json:"legal_name"`
-	AnnualFragmentTarget int32  `json:"annual_fragment_target"`
-	TotalSponsoredQuota  int32  `json:"total_sponsored_quota"`
-	UsedSponsoredQuota   int32  `json:"used_sponsored_quota"`
-	RemainingQuota       int32  `json:"remaining_quota"`
-	Pojk51ReadinessPct   string `json:"pojk51_readiness_pct"`
+	CompanyID            string  `json:"company_id"`
+	LegalName            string  `json:"legal_name"`
+	AnnualFragmentTarget int32   `json:"annual_fragment_target"`
+	TotalSponsoredQuota  int32   `json:"total_sponsored_quota"`
+	UsedSponsoredQuota   int32   `json:"used_sponsored_quota"`
+	RemainingQuota       int32   `json:"remaining_quota"`
+	Pojk51ReadinessPct   float64 `json:"pojk51_readiness_pct"`
 }
 
 // GetMemberByUserID looks up the company membership for an authenticated user.
@@ -321,6 +321,8 @@ func (s *Service) GetCorporateDashboard(ctx context.Context, companyID uuid.UUID
 		}
 	}
 
+	readinessFloat, _ := readiness.Float64()
+
 	return &CorporateDashboardDTO{
 		CompanyID:            sum.CompanyID.String(),
 		LegalName:            sum.LegalName,
@@ -328,6 +330,6 @@ func (s *Service) GetCorporateDashboard(ctx context.Context, companyID uuid.UUID
 		TotalSponsoredQuota:  sum.TotalSponsoredQuota,
 		UsedSponsoredQuota:   sum.UsedSponsoredQuota,
 		RemainingQuota:       remaining,
-		Pojk51ReadinessPct:   readiness.StringFixed(2),
+		Pojk51ReadinessPct:   readinessFloat,
 	}, nil
 }

@@ -298,6 +298,39 @@ func (h *Handler) handleGenerateESGReport(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusAccepted, receipt)
 }
 
+type EsgReportDTO struct {
+	ID               uuid.UUID `json:"id"`
+	CompanyID        uuid.UUID `json:"company_id"`
+	FiscalYear       int32     `json:"fiscal_year"`
+	FiscalQuarter    int32     `json:"fiscal_quarter"`
+	AuditorStatus    string    `json:"auditor_status"`
+	ChapterPdfURL    *string   `json:"chapter_pdf_url"`
+	RawDatasetCsvURL *string   `json:"raw_dataset_csv_url"`
+	CreatedAt        string    `json:"created_at"`
+}
+
+func toEsgReportDTO(rep store.EsgAuditReports) EsgReportDTO {
+	var pdf *string
+	if rep.ChapterPdfUrl.Valid && rep.ChapterPdfUrl.String != "" {
+		pdf = &rep.ChapterPdfUrl.String
+	}
+	var csv *string
+	if rep.RawDatasetCsvUrl.Valid && rep.RawDatasetCsvUrl.String != "" {
+		csv = &rep.RawDatasetCsvUrl.String
+	}
+
+	return EsgReportDTO{
+		ID:               rep.ID,
+		CompanyID:        rep.CompanyID,
+		FiscalYear:       rep.FiscalYear,
+		FiscalQuarter:    rep.FiscalQuarter,
+		AuditorStatus:    string(rep.AuditorStatus),
+		ChapterPdfURL:    pdf,
+		RawDatasetCsvURL: csv,
+		CreatedAt:        rep.CreatedAt.Time.Format(time.RFC3339),
+	}
+}
+
 func (h *Handler) handleListESGReports(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	compID, err := uuid.Parse(idStr)
@@ -312,7 +345,12 @@ func (h *Handler) handleListESGReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"reports": reports})
+	items := make([]EsgReportDTO, len(reports))
+	for i, rep := range reports {
+		items[i] = toEsgReportDTO(rep)
+	}
+
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) handleGetClientDashboard(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +394,12 @@ func (h *Handler) handleListClientReports(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, reports)
+	items := make([]EsgReportDTO, len(reports))
+	for i, rep := range reports {
+		items[i] = toEsgReportDTO(rep)
+	}
+
+	writeJSON(w, http.StatusOK, items)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

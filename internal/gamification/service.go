@@ -618,17 +618,32 @@ func (s *Service) GetUserStreak(ctx context.Context, userID uuid.UUID) (*store.U
 	return &streak, nil
 }
 
-// GetLeaderboard returns the global user ranking by points.
-func (s *Service) GetLeaderboard(ctx context.Context, limit, offset int32) ([]store.GetLeaderboardRow, error) {
+// GetLeaderboard returns the global user ranking by points / donation USD.
+func (s *Service) GetLeaderboard(ctx context.Context, limit, offset int32, period string) ([]store.GetLeaderboardRow, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
+
+	var periodStart pgtype.Timestamptz
+	now := time.Now().UTC()
+	switch strings.ToLower(period) {
+	case "this_month":
+		start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		periodStart = pgtype.Timestamptz{Time: start, Valid: true}
+	case "this_year":
+		start := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		periodStart = pgtype.Timestamptz{Time: start, Valid: true}
+	default:
+		// all_time or unset
+	}
+
 	return s.store.GetLeaderboard(ctx, store.GetLeaderboardParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:       limit,
+		Offset:      offset,
+		PeriodStart: periodStart,
 	})
 }
 

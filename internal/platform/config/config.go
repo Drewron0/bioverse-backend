@@ -216,6 +216,9 @@ func Load() (*Config, error) {
 		if cfg.Payment.XenditWebhookToken == "webhook_verification_token_placeholder" || strings.TrimSpace(cfg.Payment.XenditWebhookToken) == "" {
 			return nil, fmt.Errorf("insecure or missing XENDIT_WEBHOOK_TOKEN configured for %s environment", cfg.App.Environment)
 		}
+		if strings.TrimSpace(cfg.OAuth.GoogleClientID) == "" {
+			return nil, fmt.Errorf("missing GOOGLE_CLIENT_ID configured for %s environment", cfg.App.Environment)
+		}
 	}
 
 	// Never allow simulate-paid endpoints in staging or production

@@ -590,7 +590,7 @@ UPDATE donations
 SET payment_status = $2,
     paid_at = $3,
     external_gateway_ref = COALESCE($4, external_gateway_ref)
-WHERE id = $1
+WHERE id = $1 AND (payment_status = 'pending' OR payment_status = $2)
 RETURNING id, idempotency_key, user_id, project_id, subscription_id, sponsored_quota_id, cycle_number, donation_type, is_anonymous, unit_quantity, currency_code, gross_project_value, money_amount_paid, settlement_currency_code, settlement_amount, fx_rate_snapshot, gateway_fee_settlement, money_payment_method, payment_provider, is_mixed_payment, bank_code, va_number, qris_payload, points_used, points_rate_snapshot, points_monetary_equivalent, is_points_locked, payment_status, external_gateway_ref, paid_at, expired_at, created_at, target_pet_id, coral_nickname, include_bio_shield, payment_url
 `
 

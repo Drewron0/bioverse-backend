@@ -32,7 +32,7 @@ UPDATE donations
 SET payment_status = $2,
     paid_at = $3,
     external_gateway_ref = COALESCE($4, external_gateway_ref)
-WHERE id = $1
+WHERE id = $1 AND (payment_status = 'pending' OR payment_status = $2)
 RETURNING *;
 
 -- name: ListDonationsByUserID :many

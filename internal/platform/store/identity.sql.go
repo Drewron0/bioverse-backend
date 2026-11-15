@@ -311,6 +311,54 @@ func (q *Queries) GetAdminTokenByHash(ctx context.Context, arg GetAdminTokenByHa
 	return i, err
 }
 
+const getAdminTokenByHashForUpdate = `-- name: GetAdminTokenByHashForUpdate :one
+SELECT at.id, at.admin_id, at.token_type, at.token_hash, at.expires_at, at.used_at, at.revoked_at,
+       pa.email, pa.full_name, pa.role, pa.is_active
+FROM admin_tokens at
+JOIN platform_admins pa ON at.admin_id = pa.id
+WHERE at.token_hash = $1 AND at.token_type = $2
+LIMIT 1
+FOR UPDATE OF at
+`
+
+type GetAdminTokenByHashForUpdateParams struct {
+	TokenHash string        `json:"token_hash"`
+	TokenType TokenTypeEnum `json:"token_type"`
+}
+
+type GetAdminTokenByHashForUpdateRow struct {
+	ID        uuid.UUID          `json:"id"`
+	AdminID   uuid.UUID          `json:"admin_id"`
+	TokenType TokenTypeEnum      `json:"token_type"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	Email     string             `json:"email"`
+	FullName  string             `json:"full_name"`
+	Role      AdminRole          `json:"role"`
+	IsActive  bool               `json:"is_active"`
+}
+
+func (q *Queries) GetAdminTokenByHashForUpdate(ctx context.Context, arg GetAdminTokenByHashForUpdateParams) (GetAdminTokenByHashForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getAdminTokenByHashForUpdate, arg.TokenHash, arg.TokenType)
+	var i GetAdminTokenByHashForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.AdminID,
+		&i.TokenType,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.RevokedAt,
+		&i.Email,
+		&i.FullName,
+		&i.Role,
+		&i.IsActive,
+	)
+	return i, err
+}
+
 const getPlatformAdminByEmail = `-- name: GetPlatformAdminByEmail :one
 SELECT id, full_name, email, password_hash, role, mfa_enabled, mfa_secret_encrypted, 
        mfa_verified_at, failed_login_count, locked_until, last_login_at, is_active, created_at
@@ -503,6 +551,38 @@ type GetUserTokenByHashParams struct {
 
 func (q *Queries) GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHashParams) (UserTokens, error) {
 	row := q.db.QueryRow(ctx, getUserTokenByHash, arg.TokenHash, arg.TokenType)
+	var i UserTokens
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenType,
+		&i.TokenHash,
+		&i.FcmDeviceToken,
+		&i.DeviceInfo,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUserTokenByHashForUpdate = `-- name: GetUserTokenByHashForUpdate :one
+SELECT id, user_id, token_type, token_hash, fcm_device_token, device_info, 
+       expires_at, used_at, revoked_at, created_at
+FROM user_tokens
+WHERE token_hash = $1 AND token_type = $2
+LIMIT 1
+FOR UPDATE
+`
+
+type GetUserTokenByHashForUpdateParams struct {
+	TokenHash string        `json:"token_hash"`
+	TokenType TokenTypeEnum `json:"token_type"`
+}
+
+func (q *Queries) GetUserTokenByHashForUpdate(ctx context.Context, arg GetUserTokenByHashForUpdateParams) (UserTokens, error) {
+	row := q.db.QueryRow(ctx, getUserTokenByHashForUpdate, arg.TokenHash, arg.TokenType)
 	var i UserTokens
 	err := row.Scan(
 		&i.ID,

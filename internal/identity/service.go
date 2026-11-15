@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/golang-jwt/jwt/v5"
+	"google.golang.org/api/idtoken"
 )
 
 var (
@@ -38,6 +38,8 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 	// ErrMfaRequired indicates admin requires TOTP MFA verification.
 	ErrMfaRequired = errors.New("mfa totp code required")
+	// ErrMfaAlreadyEnabled indicates admin already has MFA activated.
+	ErrMfaAlreadyEnabled = errors.New("MFA is already enabled on this account")
 	// ErrAccountLocked indicates the admin account is temporarily locked due to brute-force attempts.
 	ErrAccountLocked = errors.New("admin account is temporarily locked due to repeated failed logins")
 	// ErrInvalidTOTPCode indicates an invalid two-factor authentication code.
@@ -116,24 +118,34 @@ type UserSummary struct {
 	CreatedAt             time.Time
 }
 
+// GoogleTokenVerifier defines a function to validate Google ID tokens.
+type GoogleTokenVerifier func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error)
+
 // Service provides business logic for identity, authentication, and user accounts.
 type Service struct {
-	pool         *pgxpool.Pool
-	store        store.Querier
-	config       *config.Config
-	emailSender  email.Sender
-	pushNotifier notification.Dispatcher
+	pool           *pgxpool.Pool
+	store          store.Querier
+	config         *config.Config
+	emailSender    email.Sender
+	pushNotifier   notification.Dispatcher
+	googleVerifier GoogleTokenVerifier
 }
 
 // NewService constructs a new identity service.
 func NewService(pool *pgxpool.Pool, q store.Querier, cfg *config.Config, emailSender email.Sender, pushNotifier notification.Dispatcher) *Service {
 	return &Service{
-		pool:         pool,
-		store:        q,
-		config:       cfg,
-		emailSender:  emailSender,
-		pushNotifier: pushNotifier,
+		pool:           pool,
+		store:          q,
+		config:         cfg,
+		emailSender:    emailSender,
+		pushNotifier:   pushNotifier,
+		googleVerifier: idtoken.Validate,
 	}
+}
+
+// SetGoogleTokenVerifier allows injecting a custom or mock GoogleTokenVerifier (useful for tests).
+func (s *Service) SetGoogleTokenVerifier(verifier GoogleTokenVerifier) {
+	s.googleVerifier = verifier
 }
 
 // Register creates a new user account, streak record, and initial tokens.
@@ -392,42 +404,49 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*AuthResult, error)
 func (s *Service) RefreshToken(ctx context.Context, in RefreshInput) (*AuthResult, error) {
 	tokenHash := crypto.HashToken(in.RefreshToken)
 
-	tokenRecord, err := s.store.GetUserTokenByHash(ctx, store.GetUserTokenByHashParams{
-		TokenHash: tokenHash,
-		TokenType: store.TokenTypeEnumRefresh,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrTokenRevoked
-		}
-		return nil, fmt.Errorf("failed to lookup token: %w", err)
-	}
+	var tokenRecord store.UserTokens
+	var user store.Users
+	var rawNewRefreshToken string
 
-	if tokenRecord.RevokedAt.Valid {
-		_ = s.store.RevokeAllUserTokensForUser(ctx, store.RevokeAllUserTokensForUserParams{
-			UserID:    tokenRecord.UserID,
+	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+
+		rec, err := txStore.GetUserTokenByHashForUpdate(ctx, store.GetUserTokenByHashForUpdateParams{
+			TokenHash: tokenHash,
 			TokenType: store.TokenTypeEnumRefresh,
 		})
-		return nil, ErrTokenRevoked
-	}
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrTokenRevoked
+			}
+			return fmt.Errorf("failed to lookup token: %w", err)
+		}
+		tokenRecord = rec
 
-	if time.Now().UTC().After(tokenRecord.ExpiresAt.Time) {
-		return nil, ErrTokenExpired
-	}
+		if tokenRecord.RevokedAt.Valid {
+			// Breach detection: A revoked token is being used again! Revoke all refresh tokens for this user.
+			_ = txStore.RevokeAllUserTokensForUser(ctx, store.RevokeAllUserTokensForUserParams{
+				UserID:    tokenRecord.UserID,
+				TokenType: store.TokenTypeEnumRefresh,
+			})
+			return ErrTokenRevoked
+		}
 
-	rawNewRefreshToken, err := crypto.GenerateRandomString(32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate rotated refresh token: %w", err)
-	}
-	newTokenHash := crypto.HashToken(rawNewRefreshToken)
-	newTokenID, err := uuid.NewV7()
-	if err != nil {
-		newTokenID = uuid.New()
-	}
-	newRefreshExpiry := time.Now().UTC().Add(s.config.Auth.RefreshExpiry)
+		if time.Now().UTC().After(tokenRecord.ExpiresAt.Time) {
+			return ErrTokenExpired
+		}
 
-	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		txStore := store.New(tx)
+		var genErr error
+		rawNewRefreshToken, genErr = crypto.GenerateRandomString(32)
+		if genErr != nil {
+			return fmt.Errorf("failed to generate rotated refresh token: %w", genErr)
+		}
+		newTokenHash := crypto.HashToken(rawNewRefreshToken)
+		newTokenID, genErr := uuid.NewV7()
+		if genErr != nil {
+			newTokenID = uuid.New()
+		}
+		newRefreshExpiry := time.Now().UTC().Add(s.config.Auth.RefreshExpiry)
 
 		if err := txStore.MarkUserTokenUsed(ctx, tokenRecord.ID); err != nil {
 			return fmt.Errorf("failed to mark token as used: %w", err)
@@ -448,15 +467,19 @@ func (s *Service) RefreshToken(ctx context.Context, in RefreshInput) (*AuthResul
 			return fmt.Errorf("failed to insert new refresh token: %w", err)
 		}
 
+		u, err := txStore.GetUserByID(ctx, tokenRecord.UserID)
+		if err != nil {
+			return fmt.Errorf("failed to get user info: %w", err)
+		}
+		user = u
+
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrTokenExpired) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("token rotation transaction failed: %w", err)
-	}
-
-	user, err := s.store.GetUserByID(ctx, tokenRecord.UserID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user info: %w", err)
 	}
 
 	accessToken, err := crypto.GenerateAccessToken(
@@ -549,42 +572,41 @@ func (s *Service) GetUserProfile(ctx context.Context, userID uuid.UUID) (*UserSu
 	}, nil
 }
 
-// validateGoogleIDToken parses and validates a Google OIDC ID token structure and claims.
-func (s *Service) validateGoogleIDToken(idToken string) (string, string, error) {
-	parts := strings.Split(idToken, ".")
-	if len(parts) != 3 {
-		return "", "", errors.New("invalid Google ID token format: token must have 3 segments")
+// validateGoogleIDToken cryptographically validates a Google OIDC ID token structure, signature, and claims.
+func (s *Service) validateGoogleIDToken(ctx context.Context, idToken string) (string, string, error) {
+	if strings.TrimSpace(idToken) == "" {
+		return "", "", errors.New("google ID token must not be empty")
 	}
 
-	parser := jwt.NewParser()
-	token, _, err := parser.ParseUnverified(idToken, jwt.MapClaims{})
+	verifier := s.googleVerifier
+	if verifier == nil {
+		verifier = idtoken.Validate
+	}
+
+	payload, err := verifier(ctx, idToken, s.config.OAuth.GoogleClientID)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to parse Google ID token: %w", err)
+		return "", "", fmt.Errorf("cryptographic Google ID token verification failed: %w", err)
+	}
+	if payload == nil {
+		return "", "", errors.New("empty Google ID token payload")
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", "", errors.New("invalid Google ID token claims payload")
-	}
-
-	iss, _ := claims["iss"].(string)
-	if iss != "accounts.google.com" && iss != "https://accounts.google.com" {
+	// Verify issuer
+	if payload.Issuer != "accounts.google.com" && payload.Issuer != "https://accounts.google.com" {
 		return "", "", errors.New("invalid Google ID token issuer")
 	}
 
-	exp, ok := claims["exp"].(float64)
-	if !ok || time.Now().UTC().Unix() > int64(exp) {
+	// Verify expiration
+	if payload.Expires > 0 && time.Now().UTC().Unix() > payload.Expires {
 		return "", "", errors.New("google ID token has expired")
 	}
 
-	if s.config.OAuth.GoogleClientID != "" {
-		aud, _ := claims["aud"].(string)
-		if aud != s.config.OAuth.GoogleClientID {
-			return "", "", errors.New("google ID token audience mismatch")
-		}
+	// If GoogleClientID is configured, verify audience matches
+	if s.config.OAuth.GoogleClientID != "" && payload.Audience != s.config.OAuth.GoogleClientID {
+		return "", "", errors.New("google ID token audience mismatch")
 	}
 
-	emailRaw, ok := claims["email"].(string)
+	emailRaw, ok := payload.Claims["email"].(string)
 	if !ok || strings.TrimSpace(emailRaw) == "" {
 		return "", "", errors.New("google ID token missing email claim")
 	}
@@ -593,7 +615,7 @@ func (s *Service) validateGoogleIDToken(idToken string) (string, string, error) 
 		return "", "", fmt.Errorf("invalid email address in Google ID token: %w", err)
 	}
 
-	if ev, ok := claims["email_verified"]; ok {
+	if ev, ok := payload.Claims["email_verified"]; ok {
 		switch v := ev.(type) {
 		case bool:
 			if !v {
@@ -604,9 +626,11 @@ func (s *Service) validateGoogleIDToken(idToken string) (string, string, error) 
 				return "", "", errors.New("google email is not verified")
 			}
 		}
+	} else {
+		return "", "", errors.New("google ID token missing email_verified claim")
 	}
 
-	fullName, _ := claims["name"].(string)
+	fullName, _ := payload.Claims["name"].(string)
 	if strings.TrimSpace(fullName) == "" {
 		fullName = "Google User"
 	}
@@ -620,7 +644,7 @@ func (s *Service) LoginWithGoogle(ctx context.Context, idToken string, deviceInf
 		return nil, errors.New("id_token must not be empty")
 	}
 
-	email, fullName, err := s.validateGoogleIDToken(idToken)
+	email, fullName, err := s.validateGoogleIDToken(ctx, idToken)
 	if err != nil {
 		return nil, fmt.Errorf("google token validation failed: %w", err)
 	}
@@ -945,49 +969,78 @@ func (s *Service) AdminRefresh(ctx context.Context, rawRefreshToken string) (*Ad
 	}
 
 	tokenHash := crypto.HashToken(rawRefreshToken)
-	tokenRecord, err := s.store.GetAdminTokenByHash(ctx, store.GetAdminTokenByHashParams{
-		TokenHash: tokenHash,
-		TokenType: store.TokenTypeEnumRefresh,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrInvalidRefreshToken
+
+	var res *AdminAuthResult
+	err := database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+		tokenRecord, err := txStore.GetAdminTokenByHashForUpdate(ctx, store.GetAdminTokenByHashForUpdateParams{
+			TokenHash: tokenHash,
+			TokenType: store.TokenTypeEnumRefresh,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrInvalidRefreshToken
+			}
+			return fmt.Errorf("failed to lookup admin token: %w", err)
 		}
-		return nil, fmt.Errorf("failed to lookup admin token: %w", err)
-	}
 
-	if time.Now().UTC().After(tokenRecord.ExpiresAt.Time) {
-		return nil, ErrRefreshTokenExpired
-	}
+		if tokenRecord.RevokedAt.Valid || tokenRecord.UsedAt.Valid {
+			return ErrInvalidRefreshToken
+		}
 
-	_ = s.store.MarkAdminTokenUsed(ctx, tokenRecord.ID)
+		if time.Now().UTC().After(tokenRecord.ExpiresAt.Time) {
+			return ErrRefreshTokenExpired
+		}
 
-	accessToken, err := crypto.GenerateAdminAccessToken(tokenRecord.AdminID, tokenRecord.Email, string(tokenRecord.Role), s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign admin token: %w", err)
-	}
+		if err := txStore.MarkAdminTokenUsed(ctx, tokenRecord.ID); err != nil {
+			return err
+		}
+		if err := txStore.RevokeAdminToken(ctx, tokenHash); err != nil {
+			return err
+		}
 
-	newRawRefresh, _ := crypto.GenerateRandomString(32)
-	newRefreshHash := crypto.HashToken(newRawRefresh)
-	newTokenID, _ := uuid.NewV7()
+		accessToken, err := crypto.GenerateAdminAccessToken(tokenRecord.AdminID, tokenRecord.Email, string(tokenRecord.Role), s.config.Auth.JWTSecret, s.config.Auth.AccessExpiry)
+		if err != nil {
+			return fmt.Errorf("failed to sign admin token: %w", err)
+		}
 
-	_, err = s.store.CreateAdminToken(ctx, store.CreateAdminTokenParams{
-		ID:        newTokenID,
-		AdminID:   tokenRecord.AdminID,
-		TokenType: store.TokenTypeEnumRefresh,
-		TokenHash: newRefreshHash,
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(s.config.Auth.RefreshExpiry), Valid: true},
+		newRawRefresh, err := crypto.GenerateRandomString(32)
+		if err != nil {
+			return fmt.Errorf("failed to generate new admin refresh token: %w", err)
+		}
+		newRefreshHash := crypto.HashToken(newRawRefresh)
+		newTokenID, err := uuid.NewV7()
+		if err != nil {
+			newTokenID = uuid.New()
+		}
+
+		_, err = txStore.CreateAdminToken(ctx, store.CreateAdminTokenParams{
+			ID:        newTokenID,
+			AdminID:   tokenRecord.AdminID,
+			TokenType: store.TokenTypeEnumRefresh,
+			TokenHash: newRefreshHash,
+			ExpiresAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(s.config.Auth.RefreshExpiry), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to store rotated admin refresh token: %w", err)
+		}
+
+		res = &AdminAuthResult{
+			AccessToken:  accessToken,
+			RefreshToken: newRawRefresh,
+			ExpiresIn:    int(s.config.Auth.AccessExpiry.Seconds()),
+			AdminRole:    string(tokenRecord.Role),
+		}
+		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to store rotated admin refresh token: %w", err)
+		if errors.Is(err, ErrInvalidRefreshToken) || errors.Is(err, ErrRefreshTokenExpired) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("admin token refresh failed: %w", err)
 	}
 
-	return &AdminAuthResult{
-		AccessToken:  accessToken,
-		RefreshToken: newRawRefresh,
-		ExpiresIn:    int(s.config.Auth.AccessExpiry.Seconds()),
-		AdminRole:    string(tokenRecord.Role),
-	}, nil
+	return res, nil
 }
 
 // AdminLogout revokes an active admin refresh token.
@@ -1011,6 +1064,10 @@ func (s *Service) AdminSetupMFA(ctx context.Context, adminID uuid.UUID) (*AdminM
 	admin, err := s.store.GetPlatformAdminByID(ctx, adminID)
 	if err != nil {
 		return nil, ErrInvalidCredentials
+	}
+
+	if admin.MfaEnabled {
+		return nil, ErrMfaAlreadyEnabled
 	}
 
 	secret, err := crypto.GenerateTOTPSecret()

@@ -52,6 +52,7 @@ type Querier interface {
 	DeleteNewsArticle(ctx context.Context, id uuid.UUID) error
 	EquipVirtualPetProduct(ctx context.Context, arg EquipVirtualPetProductParams) (VirtualPets, error)
 	GetAdminTokenByHash(ctx context.Context, arg GetAdminTokenByHashParams) (GetAdminTokenByHashRow, error)
+	GetAdminTokenByHashForUpdate(ctx context.Context, arg GetAdminTokenByHashForUpdateParams) (GetAdminTokenByHashForUpdateRow, error)
 	GetAppSetting(ctx context.Context, settingKey string) (AppSettings, error)
 	GetCompanyByID(ctx context.Context, id uuid.UUID) (Companies, error)
 	GetCompanyDashboardSummary(ctx context.Context, id uuid.UUID) (GetCompanyDashboardSummaryRow, error)
@@ -88,6 +89,7 @@ type Querier interface {
 	GetUserInventoryItem(ctx context.Context, arg GetUserInventoryItemParams) (GetUserInventoryItemRow, error)
 	GetUserStreakByUserID(ctx context.Context, userID uuid.UUID) (UserStreaks, error)
 	GetUserTokenByHash(ctx context.Context, arg GetUserTokenByHashParams) (UserTokens, error)
+	GetUserTokenByHashForUpdate(ctx context.Context, arg GetUserTokenByHashForUpdateParams) (UserTokens, error)
 	GetVirtualPetByID(ctx context.Context, arg GetVirtualPetByIDParams) (GetVirtualPetByIDRow, error)
 	GetWebhookEventByProviderAndExternalID(ctx context.Context, arg GetWebhookEventByProviderAndExternalIDParams) (WebhookEvents, error)
 	IncrementProjectFundedUnits(ctx context.Context, arg IncrementProjectFundedUnitsParams) (IncrementProjectFundedUnitsRow, error)

@@ -387,6 +387,7 @@ SELECT
     ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(d.gross_project_value), 0) DESC, u.points_balance DESC, u.created_at ASC) AS rank_position
 FROM users u
 LEFT JOIN donations d ON u.id = d.user_id AND d.payment_status = 'paid'
+    AND ($3::timestamptz IS NULL OR d.paid_at >= $3::timestamptz)
 WHERE u.deleted_at IS NULL
 GROUP BY u.id, u.full_name, u.avatar_url, u.points_balance, u.created_at
 ORDER BY total_donations_usd DESC, u.points_balance DESC, u.created_at ASC
@@ -394,8 +395,9 @@ LIMIT $1 OFFSET $2
 `
 
 type GetLeaderboardParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit       int32              `json:"limit"`
+	Offset      int32              `json:"offset"`
+	PeriodStart pgtype.Timestamptz `json:"period_start"`
 }
 
 type GetLeaderboardRow struct {
@@ -410,7 +412,7 @@ type GetLeaderboardRow struct {
 }
 
 func (q *Queries) GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) ([]GetLeaderboardRow, error) {
-	rows, err := q.db.Query(ctx, getLeaderboard, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, getLeaderboard, arg.Limit, arg.Offset, arg.PeriodStart)
 	if err != nil {
 		return nil, err
 	}

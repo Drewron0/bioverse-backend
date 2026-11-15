@@ -82,6 +82,7 @@ func TestConfigStagingPermitsMissingCVServiceURL(t *testing.T) {
 	_ = os.Setenv("HMAC_SECRET", "non_default_hmac_secret_for_testing_123456")
 	_ = os.Setenv("XENDIT_SECRET_KEY", "xnd_production_secret_valid_key")
 	_ = os.Setenv("XENDIT_WEBHOOK_TOKEN", "valid_webhook_token_for_prod")
+	_ = os.Setenv("GOOGLE_CLIENT_ID", "valid_google_client_id_for_testing")
 	_ = os.Setenv("CV_SERVICE_URL", "")
 	_ = os.Setenv("ALLOW_SIMULATE_PAID", "true")
 	defer func() {
@@ -92,6 +93,7 @@ func TestConfigStagingPermitsMissingCVServiceURL(t *testing.T) {
 		_ = os.Unsetenv("HMAC_SECRET")
 		_ = os.Unsetenv("XENDIT_SECRET_KEY")
 		_ = os.Unsetenv("XENDIT_WEBHOOK_TOKEN")
+		_ = os.Unsetenv("GOOGLE_CLIENT_ID")
 		_ = os.Unsetenv("CV_SERVICE_URL")
 		_ = os.Unsetenv("ALLOW_SIMULATE_PAID")
 	}()
@@ -103,5 +105,31 @@ func TestConfigStagingPermitsMissingCVServiceURL(t *testing.T) {
 
 	if cfg.Payment.AllowSimulatePaid {
 		t.Errorf("expected AllowSimulatePaid to be forced false in staging, got true")
+	}
+}
+
+func TestConfigStagingRejectsMissingGoogleClientID(t *testing.T) {
+	_ = os.Setenv("APP_ENV", "staging")
+	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	_ = os.Setenv("JWT_SECRET", "super_secret_key_bioverse_2026_valid_prod_key_123456789")
+	_ = os.Setenv("APP_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	_ = os.Setenv("HMAC_SECRET", "non_default_hmac_secret_for_testing_123456")
+	_ = os.Setenv("XENDIT_SECRET_KEY", "xnd_production_secret_valid_key")
+	_ = os.Setenv("XENDIT_WEBHOOK_TOKEN", "valid_webhook_token_for_prod")
+	_ = os.Setenv("GOOGLE_CLIENT_ID", "")
+	defer func() {
+		_ = os.Unsetenv("APP_ENV")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("JWT_SECRET")
+		_ = os.Unsetenv("APP_ENCRYPTION_KEY")
+		_ = os.Unsetenv("HMAC_SECRET")
+		_ = os.Unsetenv("XENDIT_SECRET_KEY")
+		_ = os.Unsetenv("XENDIT_WEBHOOK_TOKEN")
+		_ = os.Unsetenv("GOOGLE_CLIENT_ID")
+	}()
+
+	_, err := Load()
+	if err == nil {
+		t.Fatalf("expected error when GOOGLE_CLIENT_ID is missing in staging, got nil")
 	}
 }

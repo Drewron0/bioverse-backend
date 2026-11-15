@@ -521,6 +521,10 @@ func (h *Handler) handleAdminMFASetup(w http.ResponseWriter, r *http.Request) {
 
 	setup, err := h.service.AdminSetupMFA(r.Context(), adminID)
 	if err != nil {
+		if errors.Is(err, ErrMfaAlreadyEnabled) || strings.Contains(err.Error(), "already enabled") {
+			httperr.BadRequest(w, r, "MFA is already enabled on this account.", nil)
+			return
+		}
 		httperr.InternalServerError(w, r)
 		return
 	}

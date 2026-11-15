@@ -166,9 +166,6 @@ func (s *Service) RecordWorkLog(ctx context.Context, in RecordWorkLogInput) (*st
 		rate = decimalutil.FromNumeric(op.RatePerMaintenanceIdr)
 	}
 	feeEarned := rate.Mul(decimal.NewFromInt(int64(in.UnitsCompleted)))
-	if feeEarned.IsZero() && in.FeeEarnedIDR.IsPositive() {
-		feeEarned = in.FeeEarnedIDR
-	}
 
 	logID, _ := uuid.NewV7()
 	var frameID pgtype.UUID
@@ -405,8 +402,12 @@ func (s *Service) ApprovePayout(ctx context.Context, payoutID uuid.UUID, adminID
 		Status:            store.PayoutStatusApproved,
 		ApprovedByAdminID: adminUUID,
 		ApprovedAt:        pgtype.Timestamptz{Time: now, Valid: true},
+		ExpectedStatus:    store.NullPayoutStatus{PayoutStatus: current.Status, Valid: true},
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidPayoutStatusTransition
+		}
 		return nil, fmt.Errorf("failed to approve operator payout: %w", err)
 	}
 	return &payout, nil
@@ -438,8 +439,12 @@ func (s *Service) DisbursePayout(ctx context.Context, payoutID uuid.UUID, extern
 		Status:                 store.PayoutStatusDisbursed,
 		DisbursedAt:            pgtype.Timestamptz{Time: now, Valid: true},
 		ExternalDisbursementID: pgtype.Text{String: externalDisbursementID, Valid: true},
+		ExpectedStatus:         store.NullPayoutStatus{PayoutStatus: current.Status, Valid: true},
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPayoutNotApproved
+		}
 		return nil, fmt.Errorf("failed to disburse operator payout: %w", err)
 	}
 	return &payout, nil

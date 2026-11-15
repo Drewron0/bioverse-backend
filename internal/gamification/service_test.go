@@ -113,7 +113,7 @@ func TestGamificationEndToEnd(t *testing.T) {
 	}
 
 	// 7. Verify leaderboard contains the user
-	board, err := gamifySvc.GetLeaderboard(ctx, 10, 0)
+	board, err := gamifySvc.GetLeaderboard(ctx, 10, 0, "all_time")
 	if err != nil {
 		t.Fatalf("failed to get leaderboard: %v", err)
 	}

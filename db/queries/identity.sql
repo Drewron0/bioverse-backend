@@ -53,6 +53,14 @@ FROM user_tokens
 WHERE token_hash = $1 AND token_type = $2
 LIMIT 1;
 
+-- name: GetUserTokenByHashForUpdate :one
+SELECT id, user_id, token_type, token_hash, fcm_device_token, device_info, 
+       expires_at, used_at, revoked_at, created_at
+FROM user_tokens
+WHERE token_hash = $1 AND token_type = $2
+LIMIT 1
+FOR UPDATE;
+
 -- name: MarkUserTokenUsed :exec
 UPDATE user_tokens
 SET used_at = NOW()
@@ -123,6 +131,15 @@ FROM admin_tokens at
 JOIN platform_admins pa ON at.admin_id = pa.id
 WHERE at.token_hash = $1 AND at.token_type = $2 AND at.revoked_at IS NULL AND at.used_at IS NULL
 LIMIT 1;
+
+-- name: GetAdminTokenByHashForUpdate :one
+SELECT at.id, at.admin_id, at.token_type, at.token_hash, at.expires_at, at.used_at, at.revoked_at,
+       pa.email, pa.full_name, pa.role, pa.is_active
+FROM admin_tokens at
+JOIN platform_admins pa ON at.admin_id = pa.id
+WHERE at.token_hash = $1 AND at.token_type = $2
+LIMIT 1
+FOR UPDATE OF at;
 
 -- name: RevokeAdminToken :exec
 UPDATE admin_tokens

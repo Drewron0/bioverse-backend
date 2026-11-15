@@ -816,7 +816,7 @@ SET status = $2,
     disbursed_at = COALESCE($5, disbursed_at),
     external_disbursement_id = COALESCE($6, external_disbursement_id),
     failure_reason = COALESCE($7, failure_reason)
-WHERE id = $1
+WHERE id = $1 AND ($8::payout_status IS NULL OR status = $8)
 RETURNING id, idempotency_key, operator_id, approved_by_admin_id, period_start, period_end, total_units_planted, total_maintenance_tasks, gross_amount_idr, transfer_fee_idr, net_disbursed_idr, payout_gateway_provider, external_disbursement_id, status, failure_reason, approved_at, disbursed_at, created_at
 `
 
@@ -828,6 +828,7 @@ type UpdateOperatorPayoutStatusParams struct {
 	DisbursedAt            pgtype.Timestamptz `json:"disbursed_at"`
 	ExternalDisbursementID pgtype.Text        `json:"external_disbursement_id"`
 	FailureReason          pgtype.Text        `json:"failure_reason"`
+	ExpectedStatus         NullPayoutStatus   `json:"expected_status"`
 }
 
 func (q *Queries) UpdateOperatorPayoutStatus(ctx context.Context, arg UpdateOperatorPayoutStatusParams) (OperatorPayouts, error) {
@@ -839,6 +840,7 @@ func (q *Queries) UpdateOperatorPayoutStatus(ctx context.Context, arg UpdateOper
 		arg.DisbursedAt,
 		arg.ExternalDisbursementID,
 		arg.FailureReason,
+		arg.ExpectedStatus,
 	)
 	var i OperatorPayouts
 	err := row.Scan(
