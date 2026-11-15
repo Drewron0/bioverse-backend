@@ -69,6 +69,7 @@ type StorageConfig struct {
 type PaymentConfig struct {
 	XenditSecretKey    string
 	XenditWebhookToken string
+	AllowSimulatePaid  bool
 }
 
 // EmailConfig defines transactional email settings.
@@ -133,6 +134,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid STORAGE_USE_SSL: %w", err)
 	}
 
+	allowSimulatePaid, err := getEnvAsBool("ALLOW_SIMULATE_PAID", false)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ALLOW_SIMULATE_PAID: %w", err)
+	}
+
 	originsRaw := getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8080")
 	origins := strings.Split(originsRaw, ",")
 	for i := range origins {
@@ -172,6 +178,7 @@ func Load() (*Config, error) {
 		Payment: PaymentConfig{
 			XenditSecretKey:    getEnv("XENDIT_SECRET_KEY", ""),
 			XenditWebhookToken: getEnv("XENDIT_WEBHOOK_TOKEN", ""),
+			AllowSimulatePaid:  allowSimulatePaid,
 		},
 		Email: EmailConfig{
 			ResendAPIKey: getEnv("RESEND_API_KEY", ""),
@@ -209,8 +216,17 @@ func Load() (*Config, error) {
 		if cfg.Payment.XenditWebhookToken == "webhook_verification_token_placeholder" || strings.TrimSpace(cfg.Payment.XenditWebhookToken) == "" {
 			return nil, fmt.Errorf("insecure or missing XENDIT_WEBHOOK_TOKEN configured for %s environment", cfg.App.Environment)
 		}
+	}
+
+	// Never allow simulate-paid endpoints in staging or production
+	if cfg.App.Environment != "development" {
+		cfg.Payment.AllowSimulatePaid = false
+	}
+
+	// In production environment, enforce real Computer Vision inference service URL
+	if cfg.App.Environment == "production" {
 		if strings.TrimSpace(cfg.CV.ServiceURL) == "" {
-			return nil, fmt.Errorf("missing CV_SERVICE_URL configured for %s environment", cfg.App.Environment)
+			return nil, fmt.Errorf("missing CV_SERVICE_URL configured for production environment")
 		}
 	}
 

@@ -20,17 +20,17 @@ import (
 
 // Handler serves HTTP endpoints for donation checkouts and webhook processing.
 type Handler struct {
-	service      *Service
-	webhookToken string
-	isDev        bool
+	service           *Service
+	webhookToken      string
+	allowSimulatePaid bool
 }
 
 // NewHandler constructs a new donation HTTP handler.
-func NewHandler(svc *Service, webhookToken string, isDev bool) *Handler {
+func NewHandler(svc *Service, webhookToken string, allowSimulatePaid bool) *Handler {
 	return &Handler{
-		service:      svc,
-		webhookToken: webhookToken,
-		isDev:        isDev,
+		service:           svc,
+		webhookToken:      webhookToken,
+		allowSimulatePaid: allowSimulatePaid,
 	}
 }
 
@@ -46,7 +46,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware func(http.Handler)
 
 	r.Route("/v1/webhooks/xendit", func(wr chi.Router) {
 		wr.Post("/", h.handleXenditWebhook)
-		if h.isDev {
+		if h.allowSimulatePaid {
 			wr.Post("/simulate-paid", h.handleSimulatePaid)
 		}
 	})

@@ -190,14 +190,14 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 		xenditGateway := payment.NewXenditClient(cfg.Payment.XenditSecretKey, log)
 
 		donationService := donation.NewService(db, queries, conservationService, xenditGateway, emailSender, fcmDispatcher)
-		isDev := cfg.App.Environment == "development"
-		donationHandler := donation.NewHandler(donationService, cfg.Payment.XenditWebhookToken, isDev)
+		donationHandler := donation.NewHandler(donationService, cfg.Payment.XenditWebhookToken, cfg.Payment.AllowSimulatePaid)
 		donationHandler.RegisterRoutes(r, userAuthMiddleware)
 
 		var cvVerifier gamification.ComputerVisionVerifier
 		if cfg.CV.ServiceURL != "" {
 			cvVerifier = gamification.NewHTTPCVVerifier(cfg.CV.ServiceURL)
 		} else {
+			log.Info("CV_SERVICE_URL is not set; using StubCVVerifier for non-production environment", slog.String("env", cfg.App.Environment))
 			cvVerifier = &gamification.StubCVVerifier{}
 		}
 		gamificationService := gamification.NewService(db, queries, cvVerifier)

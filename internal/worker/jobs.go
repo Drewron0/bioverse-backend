@@ -4,16 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
-	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/shopspring/decimal"
 )
 
 // JobRunner coordinates automated background tasks and maintenance routines.
@@ -92,54 +88,6 @@ func (j *JobRunner) ProcessExpiredDonations(ctx context.Context, batchSize int32
 
 	if processedCount > 0 {
 		j.logger.Info("expired checkout cleanup cycle completed", slog.Int("processed_count", processedCount))
-	}
-	return processedCount, nil
-}
-
-// ProcessPendingMissionSubmissions processes pending CV verifications asynchronously.
-func (j *JobRunner) ProcessPendingMissionSubmissions(ctx context.Context, batchSize int32) (int, error) {
-	if batchSize <= 0 {
-		batchSize = 25
-	}
-
-	submissions, err := j.store.ListPendingMissionSubmissions(ctx, batchSize)
-	if err != nil {
-		return 0, fmt.Errorf("failed to list pending submissions: %w", err)
-	}
-
-	processedCount := 0
-	for _, sub := range submissions {
-		confidence := decimal.NewFromFloat(0.92)
-		minConfidence := decimalutil.FromNumeric(sub.CvMinConfidence)
-		if minConfidence.IsZero() {
-			minConfidence = decimal.NewFromFloat(0.80)
-		}
-
-		passed := confidence.GreaterThanOrEqual(minConfidence)
-		newStatus := store.SubmissionStatusVerified
-		var rejection pgtype.Text
-		if !passed {
-			newStatus = store.SubmissionStatusRejected
-			rejection = pgtype.Text{String: "Confidence score below required threshold", Valid: true}
-		}
-
-		_, err := j.store.UpdateMissionSubmissionStatus(ctx, store.UpdateMissionSubmissionStatusParams{
-			ID:                sub.ID,
-			Status:            newStatus,
-			CvConfidenceScore: decimalutil.ToNumeric(confidence),
-			CvModelVersion:    pgtype.Text{String: "bioverse-cv-v1.0", Valid: true},
-			RejectionReason:   rejection,
-			VerifiedAt:        pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		})
-		if err != nil {
-			j.logger.Error("failed to update pending mission submission", slog.String("id", sub.ID.String()), slog.String("error", err.Error()))
-			continue
-		}
-		processedCount++
-	}
-
-	if processedCount > 0 {
-		j.logger.Info("async mission verification batch completed", slog.Int("processed_count", processedCount))
 	}
 	return processedCount, nil
 }

@@ -54,10 +54,6 @@ func main() {
 	expiredTicker := time.NewTicker(1 * time.Minute)
 	defer expiredTicker.Stop()
 
-	// Background ticker for async mission verification (every 10 seconds)
-	missionTicker := time.NewTicker(10 * time.Second)
-	defer missionTicker.Stop()
-
 	go func() {
 		for {
 			select {
@@ -67,10 +63,6 @@ func main() {
 				jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				_, _ = jobRunner.ProcessExpiredDonations(jobCtx, 50)
 				jobCancel()
-			case <-missionTicker.C:
-				jobCtx, jobCancel := context.WithTimeout(context.Background(), 30*time.Second)
-				_, _ = jobRunner.ProcessPendingMissionSubmissions(jobCtx, 25)
-				jobCancel()
 			}
 		}
 	}()
@@ -78,7 +70,7 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
-	appLogger.Info("worker engine running, active schedules: expired checkouts (1m), async mission verification (10s)")
+	appLogger.Info("worker engine running, active schedules: expired checkouts (1m)")
 
 	<-shutdown
 	appLogger.Info("shutting down worker gracefully...")

@@ -73,3 +73,35 @@ func TestConfigProductionRejectsMissingCVServiceURL(t *testing.T) {
 		t.Fatalf("expected error when CV_SERVICE_URL is missing in production, got nil")
 	}
 }
+
+func TestConfigStagingPermitsMissingCVServiceURL(t *testing.T) {
+	_ = os.Setenv("APP_ENV", "staging")
+	_ = os.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/test?sslmode=disable")
+	_ = os.Setenv("JWT_SECRET", "super_secret_key_bioverse_2026_valid_prod_key_123456789")
+	_ = os.Setenv("APP_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	_ = os.Setenv("HMAC_SECRET", "non_default_hmac_secret_for_testing_123456")
+	_ = os.Setenv("XENDIT_SECRET_KEY", "xnd_production_secret_valid_key")
+	_ = os.Setenv("XENDIT_WEBHOOK_TOKEN", "valid_webhook_token_for_prod")
+	_ = os.Setenv("CV_SERVICE_URL", "")
+	_ = os.Setenv("ALLOW_SIMULATE_PAID", "true")
+	defer func() {
+		_ = os.Unsetenv("APP_ENV")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("JWT_SECRET")
+		_ = os.Unsetenv("APP_ENCRYPTION_KEY")
+		_ = os.Unsetenv("HMAC_SECRET")
+		_ = os.Unsetenv("XENDIT_SECRET_KEY")
+		_ = os.Unsetenv("XENDIT_WEBHOOK_TOKEN")
+		_ = os.Unsetenv("CV_SERVICE_URL")
+		_ = os.Unsetenv("ALLOW_SIMULATE_PAID")
+	}()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected staging to boot cleanly without CV_SERVICE_URL, got %v", err)
+	}
+
+	if cfg.Payment.AllowSimulatePaid {
+		t.Errorf("expected AllowSimulatePaid to be forced false in staging, got true")
+	}
+}
