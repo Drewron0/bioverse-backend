@@ -16,6 +16,14 @@ coverage.html
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*credentials*.json
+*service-account*.json
+
+# Workspace and agent settings
+.agents/
+.skills/
 
 # IDE and editor settings
 .idea/

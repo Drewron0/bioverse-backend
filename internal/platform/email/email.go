@@ -92,7 +92,7 @@ func (c *ResendClient) Send(ctx context.Context, to, subject, htmlContent string
 
 // SendVerificationEmail dispatches a stylized welcome & verification link.
 func (c *ResendClient) SendVerificationEmail(ctx context.Context, to, fullName, verifyURL string) error {
-	subject := "Selamat Datang di BioVerse — Verifikasi Akun Anda"
+	subject := "Selamat Datang di BioVerse - Verifikasi Akun Anda"
 	html := fmt.Sprintf(`
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
 			<h2 style="color: #0d9488;">Halo, %s!</h2>
@@ -110,7 +110,7 @@ func (c *ResendClient) SendVerificationEmail(ctx context.Context, to, fullName, 
 
 // SendPasswordResetEmail dispatches a secure password reset link.
 func (c *ResendClient) SendPasswordResetEmail(ctx context.Context, to, resetURL string) error {
-	subject := "BioVerse — Permintaan Pengaturan Ulang Kata Sandi"
+	subject := "BioVerse - Permintaan Pengaturan Ulang Kata Sandi"
 	html := fmt.Sprintf(`
 		<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
 			<h2 style="color: #0d9488;">Pengaturan Ulang Kata Sandi</h2>

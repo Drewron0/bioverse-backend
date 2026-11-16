@@ -1155,7 +1155,7 @@ erDiagram
 
 
 Enums:
--- BioVerse backend: migration 00001 — all enum types (36).
+-- BioVerse backend: migration 00001 - all enum types (36).
 -- This file is BOTH the enum reference document and the first migration.
 -- Rules:
 --   * Enum = stable state machines / closed sets. Add a value later with
@@ -1166,7 +1166,7 @@ Enums:
 
 -- +goose Up
 
--- ─────────────────────────── Identity & access ───────────────────────────
+-- --------------------------- Identity & access ---------------------------
 
 -- Used by: platform_admins.role
 -- super_admin: everything incl. admin management | operations: zones, projects, frames, operators, field data
@@ -1180,7 +1180,7 @@ CREATE TYPE user_gender AS ENUM ('male', 'female', 'other', 'prefer_not_to_say')
 -- refresh: rotating refresh token | email_verification | password_reset | fcm_device: push token registration
 CREATE TYPE token_type_enum AS ENUM ('refresh', 'email_verification', 'password_reset', 'fcm_device');
 
--- ─────────────────────────── Points & gamification ───────────────────────────
+-- --------------------------- Points & gamification ---------------------------
 
 -- Used by: point_ledgers.transaction_type. Unique with (reference_type, reference_id).
 -- lock_donation / unlock_donation change locked_points_balance only (points_balance unchanged);
@@ -1204,7 +1204,7 @@ CREATE TYPE pet_boost_type AS ENUM ('bio_shield_xp', 'event_xp', 'sponsor_xp', '
 -- Operator work logs only use pending -> verified | rejected.
 CREATE TYPE submission_status AS ENUM ('pending', 'processing', 'verified', 'rejected', 'needs_review');
 
--- ─────────────────────────── Catalog, subscriptions, payments ───────────────────────────
+-- --------------------------- Catalog, subscriptions, payments ---------------------------
 
 -- Used by: subscription_plans.plan_type
 CREATE TYPE subscription_plan_type AS ENUM ('maintenance', 'premium_benefit', 'custom');
@@ -1240,7 +1240,7 @@ CREATE TYPE digital_item_type AS ENUM (
 -- Used by: iap_transactions.store_provider
 CREATE TYPE iap_store_type AS ENUM ('apple_app_store', 'google_play');
 
--- ─────────────────────────── Conservation domain ───────────────────────────
+-- --------------------------- Conservation domain ---------------------------
 
 -- Used by: coral_fragments.lifecycle_status
 -- pending_planting -> planted -> monitoring -> deceased | relocated
@@ -1268,7 +1268,7 @@ CREATE TYPE project_status AS ENUM (
     'draft', 'open_for_donation', 'fully_funded', 'planting', 'monitoring', 'completed', 'cancelled'
 );
 
--- ─────────────────────────── Field operations ───────────────────────────
+-- --------------------------- Field operations ---------------------------
 
 -- Used by: community_groups.group_type
 CREATE TYPE community_group_type AS ENUM (
@@ -1303,7 +1303,7 @@ CREATE TYPE request_status AS ENUM ('requested', 'scheduled', 'in_progress', 'co
 -- Used by: media_evidences.media_type
 CREATE TYPE evidence_media_type AS ENUM ('photo', 'video', 'orthomosaic', 'model_3d');
 
--- ─────────────────────────── B2B & ESG ───────────────────────────
+-- --------------------------- B2B & ESG ---------------------------
 
 -- Used by: company_members.role
 CREATE TYPE b2b_role AS ENUM ('corporate_admin', 'esg_manager', 'finance', 'external_auditor', 'viewer');
@@ -1326,7 +1326,7 @@ CREATE TYPE compliance_status AS ENUM ('compliant', 'at_risk', 'non_compliant', 
 -- draft -> submitted -> under_review -> certified | rejected
 CREATE TYPE report_audit_status AS ENUM ('draft', 'submitted', 'under_review', 'certified', 'rejected');
 
--- ─────────────────────────── System ───────────────────────────
+-- --------------------------- System ---------------------------
 
 -- Used by: webhook_events.status
 -- pending -> processing -> processed | failed (retry with backoff) ; ignored (unknown event type)

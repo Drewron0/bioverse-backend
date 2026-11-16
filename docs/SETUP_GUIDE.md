@@ -9,7 +9,7 @@ Dokumen ini berisi panduan langkah demi langkah yang **perlu Anda lakukan secara
 Di folder lokal saat ini, Git sudah diinisialisasi dan commit fondasi awal sudah dibuat. Namun, Anda perlu menautkannya ke akun GitHub Anda.
 
 ### Langkah-langkah:
-1. Buka [GitHub](https://github.com) dan login ke akun Anda (`Drewron01` / `aaronhans0606@gmail.com`).
+1. Buka [GitHub](https://github.com) dan login ke akun GitHub Anda.
 2. Buat repositori baru:
    - **Repository name**: `bioverse-backend`
    - **Visibility**: `Private` (direkomendasikan karena backend memuat logika bisnis dan schema enterprise) atau `Public`.

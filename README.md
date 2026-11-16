@@ -1,6 +1,6 @@
 # BioVerse Backend
 
-Backend API and background worker engine for **BioVerse** — a gamified "Ridge-to-Reef" ecosystem restoration platform ("Tamagotchi for real-world ecosystem restoration").
+Backend API and background worker engine for **BioVerse** - a gamified "Ridge-to-Reef" ecosystem restoration platform ("Tamagotchi for real-world ecosystem restoration").
 
 BioVerse powers:
 - **B2C Mobile App (Flutter)**: Coral fragment adoption, Bio-Shield add-on, virtual pets, streaks, computer vision eco-missions, restoration progress timelines.
