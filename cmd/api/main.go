@@ -244,7 +244,7 @@ func healthCheckHandler(db *pgxpool.Pool) http.HandlerFunc {
 
 		resp := healthResponse{
 			Status:    status,
-			App:       "BioVerse Backend (Test Hello)",
+			App:       "BioVerse Backend",
 			Uptime:    time.Since(startTime).Truncate(time.Second).String(),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Services:  services,
