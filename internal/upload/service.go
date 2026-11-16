@@ -159,11 +159,20 @@ func (s *Service) signS3PutURL(objectKey, contentType string, expiresInSeconds i
 	credentialScope := fmt.Sprintf("%s/%s/s3/aws4_request", dateStamp, s.cfg.Region)
 	credentialParam := fmt.Sprintf("%s/%s", s.cfg.AccessKey, credentialScope)
 
-	canonicalURI := fmt.Sprintf("/%s/%s", s.cfg.BucketName, strings.TrimPrefix(objectKey, "/"))
+	basePath := strings.TrimRight(parsedURL.Path, "/")
+	canonicalURI := fmt.Sprintf("%s/%s/%s", basePath, s.cfg.BucketName, strings.TrimPrefix(objectKey, "/"))
 
 	host := parsedURL.Host
 	if host == "" {
 		host = "127.0.0.1:9000"
+	}
+	scheme := parsedURL.Scheme
+	if scheme == "" {
+		if s.cfg.UseSSL {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
 	}
 
 	signedHeaders := "content-type;host"
@@ -199,8 +208,9 @@ func (s *Service) signS3PutURL(objectKey, contentType string, expiresInSeconds i
 	signingKey := getSignatureKey(s.cfg.SecretKey, dateStamp, s.cfg.Region, "s3")
 	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
 
-	finalURL := fmt.Sprintf("%s%s?%s&X-Amz-Signature=%s",
-		strings.TrimRight(s.cfg.Endpoint, "/"),
+	finalURL := fmt.Sprintf("%s://%s%s?%s&X-Amz-Signature=%s",
+		scheme,
+		host,
 		canonicalURI,
 		canonicalQueryString,
 		signature,

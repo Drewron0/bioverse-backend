@@ -151,3 +151,23 @@ func TestRequestPresignedUpload(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestPresignedUpload_PathPrefixedEndpoint(t *testing.T) {
+	svc := upload.NewService(upload.Config{
+		Endpoint:   "https://my-project.storage.supabase.co/storage/v1/s3",
+		BucketName: "bioverse-media",
+		AccessKey:  "test-access-key",
+		SecretKey:  "test-secret-key",
+		Region:     "ap-southeast-1",
+	})
+
+	res, err := svc.RequestPresignedUpload(context.Background(), "avatar.png", "image/png", 1024, upload.PurposeAvatar, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedPrefix := "https://my-project.storage.supabase.co/storage/v1/s3/bioverse-media/avatars/"
+	if !strings.HasPrefix(res.UploadURL, expectedPrefix) {
+		t.Errorf("expected upload URL to preserve path prefix %q, got %q", expectedPrefix, res.UploadURL)
+	}
+}
