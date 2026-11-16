@@ -80,36 +80,46 @@ jobs:
     needs: [test-and-lint, openapi-lint]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Check deployment secrets
-        id: check_secrets
-        run: |
-          if [ -n "${{ secrets.SERVER_HOST }}" ]; then
-            echo "configured=true" >> $GITHUB_OUTPUT
-          else
-            echo "configured=false" >> $GITHUB_OUTPUT
-            echo "SERVER_HOST secret not configured. Skipping automated deployment."
-          fi
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Deploy via SSH
-        if: steps.check_secrets.outputs.configured == 'true'
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+
+      - name: Run Supabase Database Migrations
+        run: |
+          go install github.com/pressly/goose/v3/cmd/goose@v3.24.1
+          goose -dir db/migrations postgres "${{ secrets.SUPABASE_DB_URL }}" up
+
+      - name: Build Linux Binaries
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bioverse-api ./cmd/api
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bioverse-worker ./cmd/worker
+
+      - name: Upload Binaries via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "bioverse-api,bioverse-worker"
+          target: "/home/bioverse-ssh"
+
+      - name: Restart Services and Verify Health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER || 'root' }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -e
-            APP_DIR="${{ secrets.SERVER_APP_DIR || '/var/www/bioverse' }}"
-            if [ -d "$APP_DIR" ]; then
-              echo "Deploying to $APP_DIR..."
-              cd "$APP_DIR"
-              git fetch origin main
-              git reset --hard origin/main
-              docker compose up -d --build
-              docker image prune -f
-              echo "BioVerse deployed successfully!"
-            else
-              echo "Directory $APP_DIR not found. Please clone repository into $APP_DIR first."
-              exit 1
-            fi
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            mv -f /home/bioverse-ssh/bioverse-api /home/bioverse-ssh/bioverse-backend/bioverse-api
+            mv -f /home/bioverse-ssh/bioverse-worker /home/bioverse-ssh/bioverse-backend/bioverse-worker
+            chmod +x /home/bioverse-ssh/bioverse-backend/bioverse-api /home/bioverse-ssh/bioverse-backend/bioverse-worker
+            systemctl --user restart bioverse-api bioverse-worker
+            sleep 2
+            curl -sf http://localhost:8085/healthz
