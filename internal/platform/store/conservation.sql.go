@@ -342,8 +342,14 @@ SELECT cp.id, cp.zone_id, cp.title, cp.description, cp.objectives, cp.category,
        cp.target_amount, cp.target_units, cp.funded_units_count, cp.planted_units_count,
        cp.surviving_units_count, cp.replant_reserve_pct, cp.donation_start_date,
        cp.donation_end_date, cp.estimated_planting_date,
-       cz.name AS zone_name, cz.region AS zone_region, cz.province AS zone_province,
-       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude
+       cz.name AS zone_name, cz.name AS location_name, cz.region AS zone_region, cz.province AS zone_province,
+       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude,
+       cz.latitude AS latitude, cz.longitude AS longitude,
+       COALESCE((
+           SELECT COUNT(DISTINCT d.user_id) 
+           FROM donations d 
+           WHERE d.project_id = cp.id AND d.payment_status = 'paid'
+       ), 0)::bigint AS contributors_count
 FROM conservation_projects cp
 JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE cp.id = $1
@@ -375,11 +381,15 @@ type GetConservationProjectByIDRow struct {
 	DonationEndDate       pgtype.Date               `json:"donation_end_date"`
 	EstimatedPlantingDate pgtype.Date               `json:"estimated_planting_date"`
 	ZoneName              string                    `json:"zone_name"`
+	LocationName          string                    `json:"location_name"`
 	ZoneRegion            string                    `json:"zone_region"`
 	ZoneProvince          string                    `json:"zone_province"`
 	ZoneEcosystemType     EcosystemKind             `json:"zone_ecosystem_type"`
 	ZoneLatitude          pgtype.Numeric            `json:"zone_latitude"`
 	ZoneLongitude         pgtype.Numeric            `json:"zone_longitude"`
+	Latitude              pgtype.Numeric            `json:"latitude"`
+	Longitude             pgtype.Numeric            `json:"longitude"`
+	ContributorsCount     int64                     `json:"contributors_count"`
 }
 
 func (q *Queries) GetConservationProjectByID(ctx context.Context, id uuid.UUID) (GetConservationProjectByIDRow, error) {
@@ -410,11 +420,15 @@ func (q *Queries) GetConservationProjectByID(ctx context.Context, id uuid.UUID) 
 		&i.DonationEndDate,
 		&i.EstimatedPlantingDate,
 		&i.ZoneName,
+		&i.LocationName,
 		&i.ZoneRegion,
 		&i.ZoneProvince,
 		&i.ZoneEcosystemType,
 		&i.ZoneLatitude,
 		&i.ZoneLongitude,
+		&i.Latitude,
+		&i.Longitude,
+		&i.ContributorsCount,
 	)
 	return i, err
 }
@@ -649,8 +663,14 @@ SELECT cp.id, cp.zone_id, cp.title, cp.description, cp.objectives, cp.category,
        cp.target_amount, cp.target_units, cp.funded_units_count, cp.planted_units_count,
        cp.surviving_units_count, cp.replant_reserve_pct, cp.donation_start_date,
        cp.donation_end_date, cp.estimated_planting_date,
-       cz.name AS zone_name, cz.region AS zone_region, cz.province AS zone_province,
-       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude
+       cz.name AS zone_name, cz.name AS location_name, cz.region AS zone_region, cz.province AS zone_province,
+       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude,
+       cz.latitude AS latitude, cz.longitude AS longitude,
+       COALESCE((
+           SELECT COUNT(DISTINCT d.user_id) 
+           FROM donations d 
+           WHERE d.project_id = cp.id AND d.payment_status = 'paid'
+       ), 0)::bigint AS contributors_count
 FROM conservation_projects cp
 JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE cp.status = 'open_for_donation'
@@ -682,11 +702,15 @@ type ListConservationProjectsRow struct {
 	DonationEndDate       pgtype.Date               `json:"donation_end_date"`
 	EstimatedPlantingDate pgtype.Date               `json:"estimated_planting_date"`
 	ZoneName              string                    `json:"zone_name"`
+	LocationName          string                    `json:"location_name"`
 	ZoneRegion            string                    `json:"zone_region"`
 	ZoneProvince          string                    `json:"zone_province"`
 	ZoneEcosystemType     EcosystemKind             `json:"zone_ecosystem_type"`
 	ZoneLatitude          pgtype.Numeric            `json:"zone_latitude"`
 	ZoneLongitude         pgtype.Numeric            `json:"zone_longitude"`
+	Latitude              pgtype.Numeric            `json:"latitude"`
+	Longitude             pgtype.Numeric            `json:"longitude"`
+	ContributorsCount     int64                     `json:"contributors_count"`
 }
 
 func (q *Queries) ListConservationProjects(ctx context.Context) ([]ListConservationProjectsRow, error) {
@@ -723,11 +747,15 @@ func (q *Queries) ListConservationProjects(ctx context.Context) ([]ListConservat
 			&i.DonationEndDate,
 			&i.EstimatedPlantingDate,
 			&i.ZoneName,
+			&i.LocationName,
 			&i.ZoneRegion,
 			&i.ZoneProvince,
 			&i.ZoneEcosystemType,
 			&i.ZoneLatitude,
 			&i.ZoneLongitude,
+			&i.Latitude,
+			&i.Longitude,
+			&i.ContributorsCount,
 		); err != nil {
 			return nil, err
 		}
@@ -971,6 +999,62 @@ func (q *Queries) ListSpiderFramesByZoneID(ctx context.Context, zoneID uuid.UUID
 			&i.DeployedAt,
 			&i.IsActive,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserAdoptedDonationUnits = `-- name: ListUserAdoptedDonationUnits :many
+SELECT d.id, d.unit_quantity, d.created_at, d.paid_at,
+       cp.id AS project_id, cp.title AS project_title, cp.category::text AS project_category,
+       cp.species_or_type_name AS species_name, cp.image_url AS project_image_url,
+       cz.name AS location_name
+FROM donations d
+JOIN conservation_projects cp ON d.project_id = cp.id
+JOIN conservation_zones cz ON cp.zone_id = cz.id
+WHERE d.user_id = $1 AND d.payment_status = 'paid' AND cp.category != 'coral'
+ORDER BY d.paid_at DESC
+`
+
+type ListUserAdoptedDonationUnitsRow struct {
+	ID              uuid.UUID          `json:"id"`
+	UnitQuantity    int32              `json:"unit_quantity"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	PaidAt          pgtype.Timestamptz `json:"paid_at"`
+	ProjectID       uuid.UUID          `json:"project_id"`
+	ProjectTitle    string             `json:"project_title"`
+	ProjectCategory string             `json:"project_category"`
+	SpeciesName     string             `json:"species_name"`
+	ProjectImageUrl string             `json:"project_image_url"`
+	LocationName    string             `json:"location_name"`
+}
+
+func (q *Queries) ListUserAdoptedDonationUnits(ctx context.Context, userID uuid.UUID) ([]ListUserAdoptedDonationUnitsRow, error) {
+	rows, err := q.db.Query(ctx, listUserAdoptedDonationUnits, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserAdoptedDonationUnitsRow
+	for rows.Next() {
+		var i ListUserAdoptedDonationUnitsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UnitQuantity,
+			&i.CreatedAt,
+			&i.PaidAt,
+			&i.ProjectID,
+			&i.ProjectTitle,
+			&i.ProjectCategory,
+			&i.SpeciesName,
+			&i.ProjectImageUrl,
+			&i.LocationName,
 		); err != nil {
 			return nil, err
 		}

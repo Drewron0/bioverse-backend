@@ -11,6 +11,7 @@ import (
 	"github.com/Drewron0/bioverse-backend/internal/platform/config"
 	"github.com/Drewron0/bioverse-backend/internal/platform/crypto"
 	"github.com/Drewron0/bioverse-backend/internal/platform/database"
+	"github.com/Drewron0/bioverse-backend/internal/platform/decimalutil"
 	"github.com/Drewron0/bioverse-backend/internal/platform/email"
 	"github.com/Drewron0/bioverse-backend/internal/platform/notification"
 	"github.com/Drewron0/bioverse-backend/internal/platform/store"
@@ -1170,6 +1171,97 @@ func (s *Service) ListUserNotifications(ctx context.Context, userID uuid.UUID, l
 		result = append(result, item)
 	}
 	return result, nil
+}
+
+// ListUserNotificationsWithCursor returns paginated notifications for the user using cursor-based pagination.
+func (s *Service) ListUserNotificationsWithCursor(ctx context.Context, userID uuid.UUID, cursor *time.Time, limit int) ([]NotificationDTO, *string, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var cursorParam pgtype.Timestamptz
+	if cursor != nil {
+		cursorParam = pgtype.Timestamptz{Time: *cursor, Valid: true}
+	}
+
+	fetchLimit := limit + 1
+	rows, err := s.store.ListNotificationsByUserIDWithCursor(ctx, store.ListNotificationsByUserIDWithCursorParams{
+		UserID:          userID,
+		CursorCreatedAt: cursorParam,
+		Limit:           int32(fetchLimit),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list user notifications with cursor: %w", err)
+	}
+
+	var nextCursor *string
+	if len(rows) > limit {
+		lastItem := rows[limit-1]
+		next := lastItem.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		nextCursor = &next
+		rows = rows[:limit]
+	}
+
+	result := make([]NotificationDTO, 0, len(rows))
+	for _, r := range rows {
+		item := NotificationDTO{
+			ID:               r.ID.String(),
+			Title:            r.Title,
+			Body:             r.Body,
+			NotificationType: r.NotificationType,
+			IsRead:           r.IsRead,
+			CreatedAt:        r.CreatedAt.Time.Format(time.RFC3339),
+		}
+		if r.ReferenceType.Valid {
+			item.ReferenceType = &r.ReferenceType.String
+		}
+		if r.ReferenceID.Valid {
+			refIDStr := uuid.UUID(r.ReferenceID.Bytes).String()
+			item.ReferenceID = &refIDStr
+		}
+		if r.ReadAt.Valid {
+			tStr := r.ReadAt.Time.Format(time.RFC3339)
+			item.ReadAt = &tStr
+		}
+		result = append(result, item)
+	}
+	return result, nextCursor, nil
+}
+
+// UserStatsDTO represents aggregate metrics for a user's conservation actions and points.
+type UserStatsDTO struct {
+	UserID            string `json:"user_id"`
+	CurrentPoints     int64  `json:"current_points"`
+	CurrentStreak     int32  `json:"current_streak"`
+	LongestStreak     int32  `json:"longest_streak"`
+	TotalDonationsUSD string `json:"total_donations_usd"`
+	TotalDonationsIDR string `json:"total_donations_idr"`
+	TotalUnitsAdopted int64  `json:"total_units_adopted"`
+	MissionsCompleted int64  `json:"missions_completed"`
+}
+
+// GetUserStats returns summary metrics of total donations, adopted units, points, streak, and missions.
+func (s *Service) GetUserStats(ctx context.Context, userID uuid.UUID) (*UserStatsDTO, error) {
+	row, err := s.store.GetUserStats(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to fetch user stats: %w", err)
+	}
+
+	usdVal := decimalutil.FromNumeric(row.TotalDonationsUsd).StringFixed(2)
+	idrVal := decimalutil.FromNumeric(row.TotalDonationsIdr).StringFixed(2)
+
+	return &UserStatsDTO{
+		UserID:            row.UserID.String(),
+		CurrentPoints:     row.CurrentPoints,
+		CurrentStreak:     row.CurrentStreak,
+		LongestStreak:     row.LongestStreak,
+		TotalDonationsUSD: usdVal,
+		TotalDonationsIDR: idrVal,
+		TotalUnitsAdopted: row.TotalUnitsAdopted,
+		MissionsCompleted: row.MissionsCompleted,
+	}, nil
 }
 
 // MarkNotificationRead marks a specific user notification as read.

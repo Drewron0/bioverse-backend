@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -199,6 +200,16 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 			cvVerifier = &gamification.StubCVVerifier{}
 		}
 		gamificationService := gamification.NewService(db, queries, cvVerifier)
+		gamificationService.SetImageResolver(func(key string) string {
+			if strings.HasPrefix(key, "http://") || strings.HasPrefix(key, "https://") {
+				return key
+			}
+			url, err := uploadService.SignS3GetURL(key, 900)
+			if err != nil {
+				return key
+			}
+			return url
+		})
 		gamificationHandler := gamification.NewHandler(gamificationService)
 		gamificationHandler.RegisterRoutes(r, userAuthMiddleware, adminAuthMiddleware)
 

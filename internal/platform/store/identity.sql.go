@@ -515,6 +515,65 @@ func (q *Queries) GetUserByReferralCode(ctx context.Context, referralCode pgtype
 	return i, err
 }
 
+const getUserStats = `-- name: GetUserStats :one
+SELECT 
+    u.id AS user_id,
+    u.points_balance AS current_points,
+    COALESCE(s.current_streak, 0)::int AS current_streak,
+    COALESCE(s.longest_streak, 0)::int AS longest_streak,
+    COALESCE((
+        SELECT SUM(d.gross_project_value) 
+        FROM donations d 
+        WHERE d.user_id = u.id AND d.payment_status = 'paid'
+    ), 0)::numeric AS total_donations_usd,
+    COALESCE((
+        SELECT SUM(d.settlement_amount) 
+        FROM donations d 
+        WHERE d.user_id = u.id AND d.payment_status = 'paid'
+    ), 0)::numeric AS total_donations_idr,
+    COALESCE((
+        SELECT SUM(d.unit_quantity) 
+        FROM donations d 
+        WHERE d.user_id = u.id AND d.payment_status = 'paid'
+    ), 0)::bigint AS total_units_adopted,
+    COALESCE((
+        SELECT COUNT(*) 
+        FROM user_mission_submissions ms 
+        WHERE ms.user_id = u.id AND ms.status = 'approved'
+    ), 0)::bigint AS missions_completed
+FROM users u
+LEFT JOIN user_streaks s ON u.id = s.user_id
+WHERE u.id = $1 AND u.deleted_at IS NULL
+LIMIT 1
+`
+
+type GetUserStatsRow struct {
+	UserID            uuid.UUID      `json:"user_id"`
+	CurrentPoints     int64          `json:"current_points"`
+	CurrentStreak     int32          `json:"current_streak"`
+	LongestStreak     int32          `json:"longest_streak"`
+	TotalDonationsUsd pgtype.Numeric `json:"total_donations_usd"`
+	TotalDonationsIdr pgtype.Numeric `json:"total_donations_idr"`
+	TotalUnitsAdopted int64          `json:"total_units_adopted"`
+	MissionsCompleted int64          `json:"missions_completed"`
+}
+
+func (q *Queries) GetUserStats(ctx context.Context, id uuid.UUID) (GetUserStatsRow, error) {
+	row := q.db.QueryRow(ctx, getUserStats, id)
+	var i GetUserStatsRow
+	err := row.Scan(
+		&i.UserID,
+		&i.CurrentPoints,
+		&i.CurrentStreak,
+		&i.LongestStreak,
+		&i.TotalDonationsUsd,
+		&i.TotalDonationsIdr,
+		&i.TotalUnitsAdopted,
+		&i.MissionsCompleted,
+	)
+	return i, err
+}
+
 const getUserStreakByUserID = `-- name: GetUserStreakByUserID :one
 SELECT user_id, current_streak, longest_streak, last_streak_date, last_freeze_used_date, updated_at
 FROM user_streaks
@@ -613,6 +672,51 @@ type ListNotificationsByUserIDParams struct {
 
 func (q *Queries) ListNotificationsByUserID(ctx context.Context, arg ListNotificationsByUserIDParams) ([]Notifications, error) {
 	rows, err := q.db.Query(ctx, listNotificationsByUserID, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notifications
+	for rows.Next() {
+		var i Notifications
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.Body,
+			&i.NotificationType,
+			&i.ReferenceType,
+			&i.ReferenceID,
+			&i.IsRead,
+			&i.ReadAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationsByUserIDWithCursor = `-- name: ListNotificationsByUserIDWithCursor :many
+SELECT id, user_id, title, body, notification_type, reference_type, reference_id, is_read, read_at, created_at FROM notifications
+WHERE user_id = $1
+  AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListNotificationsByUserIDWithCursorParams struct {
+	UserID          uuid.UUID          `json:"user_id"`
+	Limit           int32              `json:"limit"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+}
+
+func (q *Queries) ListNotificationsByUserIDWithCursor(ctx context.Context, arg ListNotificationsByUserIDWithCursorParams) ([]Notifications, error) {
+	rows, err := q.db.Query(ctx, listNotificationsByUserIDWithCursor, arg.UserID, arg.Limit, arg.CursorCreatedAt)
 	if err != nil {
 		return nil, err
 	}

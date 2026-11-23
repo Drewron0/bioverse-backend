@@ -62,6 +62,9 @@ type DonationResult struct {
 	DonationID         uuid.UUID
 	IdempotencyKey     string
 	DonationType       store.DonationType
+	ProjectID          *uuid.UUID
+	ProjectTitle       string
+	UnitQuantity       int
 	GrossProjectValue  decimal.Decimal
 	MoneyAmountPaid    decimal.Decimal
 	CurrencyCode       string
@@ -212,6 +215,17 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		projectTitle = project.Title
 		projectZoneID = project.ZoneID
 		projectSpecies = project.SpeciesOrTypeName
+
+		if in.DonationType == "" {
+			switch project.Category {
+			case "mangrove":
+				donationType = store.DonationTypeMangrovePlanting
+			case "tree":
+				donationType = store.DonationTypeTreePlanting
+			default:
+				donationType = store.DonationTypeCoralAdoption
+			}
+		}
 
 		if in.IncludeBioShield {
 			activeCoralsCount, err := s.store.CountActiveCoralFragmentsByUserID(ctx, pgtype.UUID{Bytes: in.UserID, Valid: true})
@@ -510,6 +524,14 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 				if err != nil {
 					return fmt.Errorf("failed to allocate coral fragments to spider frame: %w", err)
 				}
+			} else if donationType == store.DonationTypeMangrovePlanting || donationType == store.DonationTypeTreePlanting {
+				_, err = txStore.IncrementProjectFundedUnits(ctx, store.IncrementProjectFundedUnitsParams{
+					ID:                projectID,
+					FundedUnitsCount: int32(in.UnitQuantity),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to increment project funded units: %w", err)
+				}
 			}
 
 			// Fulfill Bio-Shield boost if requested
@@ -540,6 +562,9 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (*DonationResu
 		DonationID:         createdDonation.ID,
 		IdempotencyKey:     createdDonation.IdempotencyKey,
 		DonationType:       createdDonation.DonationType,
+		ProjectID:          &projectID,
+		ProjectTitle:       projectTitle,
+		UnitQuantity:       in.UnitQuantity,
 		GrossProjectValue:  decimalutil.FromNumeric(createdDonation.GrossProjectValue),
 		MoneyAmountPaid:    decimalutil.FromNumeric(createdDonation.MoneyAmountPaid),
 		CurrencyCode:       createdDonation.CurrencyCode,
@@ -645,6 +670,14 @@ func (s *Service) ProcessPaidDonation(ctx context.Context, donationID uuid.UUID,
 			if err != nil {
 				return fmt.Errorf("failed to allocate coral fragments to spider frame: %w", err)
 			}
+		} else if donation.DonationType == store.DonationTypeMangrovePlanting || donation.DonationType == store.DonationTypeTreePlanting {
+			_, err = txStore.IncrementProjectFundedUnits(ctx, store.IncrementProjectFundedUnitsParams{
+				ID:                project.ID,
+				FundedUnitsCount: donation.UnitQuantity,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to increment project funded units: %w", err)
+			}
 		}
 
 		if (donation.IncludeBioShield || donation.DonationType == store.DonationTypeBioShieldAddon) && effectivePetID != nil {
@@ -674,6 +707,18 @@ func (s *Service) ProcessPaidDonation(ctx context.Context, donationID uuid.UUID,
 // GetDonation retrieves a donation record by UUID.
 func (s *Service) GetDonation(ctx context.Context, id uuid.UUID) (*store.Donations, error) {
 	d, err := s.store.GetDonationByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDonationNotFound
+		}
+		return nil, err
+	}
+	return &d, nil
+}
+
+// GetDonationDetail retrieves an enriched donation record with project metadata by UUID.
+func (s *Service) GetDonationDetail(ctx context.Context, id uuid.UUID) (*store.GetDonationDetailByIDRow, error) {
+	d, err := s.store.GetDonationDetailByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrDonationNotFound

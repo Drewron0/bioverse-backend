@@ -219,6 +219,83 @@ func (s *Service) signS3PutURL(objectKey, contentType string, expiresInSeconds i
 	return finalURL, nil
 }
 
+// SignS3GetURL calculates standard AWS SigV4 presigned GET target URL for downloading objects.
+func (s *Service) SignS3GetURL(objectKey string, expiresInSeconds int) (string, error) {
+	if strings.HasPrefix(objectKey, "http://") || strings.HasPrefix(objectKey, "https://") {
+		return objectKey, nil
+	}
+	parsedURL, err := url.Parse(s.cfg.Endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid storage endpoint URL: %w", err)
+	}
+
+	now := time.Now().UTC()
+	dateStamp := now.Format("20060102")
+	amzDate := now.Format("20060102T150405Z")
+
+	credentialScope := fmt.Sprintf("%s/%s/s3/aws4_request", dateStamp, s.cfg.Region)
+	credentialParam := fmt.Sprintf("%s/%s", s.cfg.AccessKey, credentialScope)
+
+	basePath := strings.TrimRight(parsedURL.Path, "/")
+	canonicalURI := fmt.Sprintf("%s/%s/%s", basePath, s.cfg.BucketName, strings.TrimPrefix(objectKey, "/"))
+
+	host := parsedURL.Host
+	if host == "" {
+		host = "127.0.0.1:9000"
+	}
+	scheme := parsedURL.Scheme
+	if scheme == "" {
+		if s.cfg.UseSSL {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	signedHeaders := "host"
+	canonicalHeaders := fmt.Sprintf("host:%s\n", host)
+
+	queryParams := url.Values{}
+	queryParams.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	queryParams.Set("X-Amz-Credential", credentialParam)
+	queryParams.Set("X-Amz-Date", amzDate)
+	queryParams.Set("X-Amz-Expires", fmt.Sprintf("%d", expiresInSeconds))
+	queryParams.Set("X-Amz-SignedHeaders", signedHeaders)
+
+	canonicalQueryString := queryParams.Encode()
+
+	canonicalRequest := strings.Join([]string{
+		"GET",
+		canonicalURI,
+		canonicalQueryString,
+		canonicalHeaders,
+		signedHeaders,
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+
+	reqHash := sha256Hex([]byte(canonicalRequest))
+
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		credentialScope,
+		reqHash,
+	}, "\n")
+
+	signingKey := getSignatureKey(s.cfg.SecretKey, dateStamp, s.cfg.Region, "s3")
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
+
+	finalURL := fmt.Sprintf("%s://%s%s?%s&X-Amz-Signature=%s",
+		scheme,
+		host,
+		canonicalURI,
+		canonicalQueryString,
+		signature,
+	)
+
+	return finalURL, nil
+}
+
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])

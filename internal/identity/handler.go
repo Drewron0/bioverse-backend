@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, userAuthMiddleware, adminAuthMidd
 	r.Route("/v1/app/users", func(userRouter chi.Router) {
 		userRouter.Use(userAuthMiddleware)
 		userRouter.Get("/me", h.handleGetMe)
+		userRouter.Get("/me/stats", h.handleGetUserStats)
 		userRouter.Patch("/me", h.handlePatchMe)
 		userRouter.Post("/fcm-token", h.handleFCMToken)
 	})
@@ -612,6 +613,26 @@ func (h *Handler) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) handleGetUserStats(w http.ResponseWriter, r *http.Request) {
+	userID, ok := GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required")
+		return
+	}
+
+	stats, err := h.service.GetUserStats(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			httperr.NotFound(w, r, "User profile not found")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, stats)
+}
+
 func (h *Handler) handleListNotifications(w http.ResponseWriter, r *http.Request) {
 	userID, ok := GetUserIDFromContext(r.Context())
 	if !ok {
@@ -619,20 +640,33 @@ func (h *Handler) handleListNotifications(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	limit := int32(20)
+	limit := 20
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-			limit = int32(l)
+			limit = l
 		}
 	}
 
-	notifs, err := h.service.ListUserNotifications(r.Context(), userID, limit)
+	var cursorTime *time.Time
+	cursorStr := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	if cursorStr != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, cursorStr); err == nil {
+			cursorTime = &parsed
+		} else if parsed, err := time.Parse(time.RFC3339, cursorStr); err == nil {
+			cursorTime = &parsed
+		}
+	}
+
+	notifs, nextCursor, err := h.service.ListUserNotificationsWithCursor(r.Context(), userID, cursorTime, limit)
 	if err != nil {
 		httperr.InternalServerError(w, r)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, notifs)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":       notifs,
+		"next_cursor": nextCursor,
+	})
 }
 
 func (h *Handler) handleMarkNotificationRead(w http.ResponseWriter, r *http.Request) {

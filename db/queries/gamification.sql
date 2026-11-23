@@ -76,14 +76,36 @@ RETURNING user_id, current_streak, longest_streak, last_streak_date, last_freeze
 
 -- name: ListActiveMissions :many
 SELECT id, sponsor_company_id, title, description, instructions, category, difficulty, image_url,
-       points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at
+       points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, 
+       estimated_minutes, created_at
 FROM eco_missions
 WHERE is_active = true
 ORDER BY is_daily DESC, points_reward ASC;
 
+-- name: ListActiveMissionsForUser :many
+SELECT m.id, m.sponsor_company_id, m.title, m.description, m.instructions, m.category, m.difficulty, m.image_url,
+       m.points_reward, m.xp_reward, m.requires_camera_proof, m.cv_target_label, m.cv_min_confidence, m.is_daily, m.is_active, 
+       m.estimated_minutes, m.created_at,
+       (
+           SELECT s.status 
+           FROM user_mission_submissions s 
+           WHERE s.mission_id = m.id AND s.user_id = $1
+           ORDER BY s.submitted_at DESC 
+           LIMIT 1
+       ) AS my_last_submission_status,
+       EXISTS (
+           SELECT 1 
+           FROM user_mission_submissions s 
+           WHERE s.mission_id = m.id AND s.user_id = $1 AND s.submission_date = CURRENT_DATE AND s.status = 'approved'
+       ) AS completed_today
+FROM eco_missions m
+WHERE m.is_active = true
+ORDER BY m.is_daily DESC, m.points_reward ASC;
+
 -- name: GetMissionByID :one
 SELECT id, sponsor_company_id, title, description, instructions, category, difficulty, image_url,
-       points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, created_at
+       points_reward, xp_reward, requires_camera_proof, cv_target_label, cv_min_confidence, is_daily, is_active, 
+       estimated_minutes, created_at
 FROM eco_missions
 WHERE id = $1 AND is_active = true
 LIMIT 1;

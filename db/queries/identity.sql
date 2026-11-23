@@ -199,6 +199,44 @@ WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
 
+-- name: ListNotificationsByUserIDWithCursor :many
+SELECT * FROM notifications
+WHERE user_id = $1
+  AND (sqlc.narg('cursor_created_at')::timestamptz IS NULL OR created_at < sqlc.narg('cursor_created_at')::timestamptz)
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- name: GetUserStats :one
+SELECT 
+    u.id AS user_id,
+    u.points_balance AS current_points,
+    COALESCE(s.current_streak, 0)::int AS current_streak,
+    COALESCE(s.longest_streak, 0)::int AS longest_streak,
+    COALESCE((
+        SELECT SUM(d.gross_project_value) 
+        FROM donations d 
+        WHERE d.user_id = u.id AND d.payment_status = 'paid'
+    ), 0)::numeric AS total_donations_usd,
+    COALESCE((
+        SELECT SUM(d.settlement_amount) 
+        FROM donations d 
+        WHERE d.user_id = u.id AND d.payment_status = 'paid'
+    ), 0)::numeric AS total_donations_idr,
+    COALESCE((
+        SELECT SUM(d.unit_quantity) 
+        FROM donations d 
+        WHERE d.user_id = u.id AND d.payment_status = 'paid'
+    ), 0)::bigint AS total_units_adopted,
+    COALESCE((
+        SELECT COUNT(*) 
+        FROM user_mission_submissions ms 
+        WHERE ms.user_id = u.id AND ms.status = 'approved'
+    ), 0)::bigint AS missions_completed
+FROM users u
+LEFT JOIN user_streaks s ON u.id = s.user_id
+WHERE u.id = $1 AND u.deleted_at IS NULL
+LIMIT 1;
+
 -- name: MarkNotificationAsRead :one
 UPDATE notifications
 SET is_read = true, read_at = NOW()

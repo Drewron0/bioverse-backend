@@ -75,6 +75,9 @@ type checkoutRequest struct {
 
 type checkoutResponse struct {
 	DonationID             string                 `json:"donation_id"`
+	ProjectID              *string                `json:"project_id,omitempty"`
+	ProjectTitle           *string                `json:"project_title,omitempty"`
+	Quantity               int                    `json:"quantity,omitempty"`
 	DonationType           string                 `json:"donation_type"`
 	Status                 string                 `json:"status"`
 	GrossAmount            string                 `json:"gross_amount"`
@@ -218,8 +221,21 @@ func (h *Handler) handleCheckout(w http.ResponseWriter, r *http.Request) {
 		"payment_url":    paymentURL,
 	}
 
+	var projIDStr *string
+	if result.ProjectID != nil && *result.ProjectID != uuid.Nil {
+		s := result.ProjectID.String()
+		projIDStr = &s
+	}
+	var projTitleStr *string
+	if result.ProjectTitle != "" {
+		projTitleStr = &result.ProjectTitle
+	}
+
 	resp := checkoutResponse{
 		DonationID:             result.DonationID.String(),
+		ProjectID:              projIDStr,
+		ProjectTitle:           projTitleStr,
+		Quantity:               result.UnitQuantity,
 		DonationType:           string(result.DonationType),
 		Status:                 string(result.PaymentStatus),
 		GrossAmount:            result.GrossProjectValue.StringFixed(2),
@@ -252,6 +268,12 @@ type donationDetailDTO struct {
 	ID                     string                     `json:"id"`
 	DonationType           string                     `json:"donation_type"`
 	Status                 string                     `json:"status"`
+	ProjectID              *string                    `json:"project_id,omitempty"`
+	ProjectTitle           *string                    `json:"project_title,omitempty"`
+	ProjectCategory        *string                    `json:"project_category,omitempty"`
+	ImageURL               *string                    `json:"image_url,omitempty"`
+	LocationName           *string                    `json:"location_name,omitempty"`
+	Quantity               int32                      `json:"quantity"`
 	GrossAmount            string                     `json:"gross_amount"`
 	NetPayableAmount       string                     `json:"net_payable_amount"`
 	CurrencyCode           string                     `json:"currency_code"`
@@ -265,6 +287,88 @@ type donationDetailDTO struct {
 	PaidAt                 *string                    `json:"paid_at"`
 	ExpiredAt              *string                    `json:"expired_at"`
 	CreatedAt              string                     `json:"created_at"`
+}
+
+func mapDetailRowToDetail(d *store.GetDonationDetailByIDRow) donationDetailDTO {
+	var paidAt *string
+	if d.PaidAt.Valid {
+		f := d.PaidAt.Time.UTC().Format(time.RFC3339)
+		paidAt = &f
+	}
+	var expiredAt *string
+	if d.ExpiredAt.Valid {
+		f := d.ExpiredAt.Time.UTC().Format(time.RFC3339)
+		expiredAt = &f
+	}
+
+	var paymentURL *string
+	if d.PaymentUrl.Valid && d.PaymentUrl.String != "" {
+		paymentURL = &d.PaymentUrl.String
+	}
+	var qrCodeString *string
+	if d.QrisPayload.Valid && d.QrisPayload.String != "" {
+		qrCodeString = &d.QrisPayload.String
+	}
+	var vaNumber *string
+	if d.VaNumber.Valid && d.VaNumber.String != "" {
+		vaNumber = &d.VaNumber.String
+	}
+	var bankCode *string
+	if d.BankCode.Valid && d.BankCode.String != "" {
+		bankCode = &d.BankCode.String
+	}
+
+	var projID *string
+	if d.ProjectID != uuid.Nil {
+		s := d.ProjectID.String()
+		projID = &s
+	}
+	var projTitle *string
+	if d.ProjectTitle.Valid {
+		projTitle = &d.ProjectTitle.String
+	}
+	var projCat *string
+	if d.ProjectCategory != "" {
+		projCat = &d.ProjectCategory
+	}
+	var imgURL *string
+	if d.ProjectImageUrl.Valid {
+		imgURL = &d.ProjectImageUrl.String
+	}
+	var locName *string
+	if d.ProjectLocationName.Valid {
+		locName = &d.ProjectLocationName.String
+	}
+
+	return donationDetailDTO{
+		ID:                     d.ID.String(),
+		DonationType:           string(d.DonationType),
+		Status:                 string(d.PaymentStatus),
+		ProjectID:              projID,
+		ProjectTitle:           projTitle,
+		ProjectCategory:        projCat,
+		ImageURL:               imgURL,
+		LocationName:           locName,
+		Quantity:               d.UnitQuantity,
+		GrossAmount:            decimalutil.FromNumeric(d.GrossProjectValue).StringFixed(2),
+		NetPayableAmount:       decimalutil.FromNumeric(d.MoneyAmountPaid).StringFixed(2),
+		CurrencyCode:           d.CurrencyCode,
+		SettlementCurrencyCode: d.SettlementCurrencyCode,
+		SettlementAmount:       decimalutil.FromNumeric(d.SettlementAmount).StringFixed(2),
+		FxRateSnapshot:         decimalutil.FromNumeric(d.FxRateSnapshot).StringFixed(6),
+		PointsBurned:           d.PointsUsed,
+		PaymentMethodType:      string(d.MoneyPaymentMethod),
+		IsAnonymous:            d.IsAnonymous,
+		PaymentDetails: &donationPaymentDetailsDTO{
+			PaymentURL:   paymentURL,
+			QRCodeString: qrCodeString,
+			VANumber:     vaNumber,
+			BankCode:     bankCode,
+		},
+		PaidAt:    paidAt,
+		ExpiredAt: expiredAt,
+		CreatedAt: d.CreatedAt.Time.UTC().Format(time.RFC3339),
+	}
 }
 
 func mapDonationToDetail(d *store.Donations) donationDetailDTO {
@@ -296,10 +400,18 @@ func mapDonationToDetail(d *store.Donations) donationDetailDTO {
 		bankCode = &d.BankCode.String
 	}
 
+	var projID *string
+	if d.ProjectID != uuid.Nil {
+		s := d.ProjectID.String()
+		projID = &s
+	}
+
 	return donationDetailDTO{
 		ID:                     d.ID.String(),
 		DonationType:           string(d.DonationType),
 		Status:                 string(d.PaymentStatus),
+		ProjectID:              projID,
+		Quantity:               d.UnitQuantity,
 		GrossAmount:            decimalutil.FromNumeric(d.GrossProjectValue).StringFixed(2),
 		NetPayableAmount:       decimalutil.FromNumeric(d.MoneyAmountPaid).StringFixed(2),
 		CurrencyCode:           d.CurrencyCode,
@@ -350,10 +462,38 @@ func mapCursorRowToDetail(d *store.ListDonationsByUserIDWithCursorRow) donationD
 		bankCode = &d.BankCode.String
 	}
 
+	var projID *string
+	if d.ProjectID != uuid.Nil {
+		s := d.ProjectID.String()
+		projID = &s
+	}
+	var projTitle *string
+	if d.ProjectTitle.Valid {
+		projTitle = &d.ProjectTitle.String
+	}
+	var projCat *string
+	if d.ProjectCategory != "" {
+		projCat = &d.ProjectCategory
+	}
+	var imgURL *string
+	if d.ProjectImageUrl.Valid {
+		imgURL = &d.ProjectImageUrl.String
+	}
+	var locName *string
+	if d.ProjectLocationName.Valid {
+		locName = &d.ProjectLocationName.String
+	}
+
 	return donationDetailDTO{
 		ID:                     d.ID.String(),
 		DonationType:           string(d.DonationType),
 		Status:                 string(d.PaymentStatus),
+		ProjectID:              projID,
+		ProjectTitle:           projTitle,
+		ProjectCategory:        projCat,
+		ImageURL:               imgURL,
+		LocationName:           locName,
+		Quantity:               d.UnitQuantity,
 		GrossAmount:            decimalutil.FromNumeric(d.GrossProjectValue).StringFixed(2),
 		NetPayableAmount:       decimalutil.FromNumeric(d.MoneyAmountPaid).StringFixed(2),
 		CurrencyCode:           d.CurrencyCode,
@@ -389,7 +529,7 @@ func (h *Handler) handleGetDonation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	donation, err := h.service.GetDonation(r.Context(), donationID)
+	donation, err := h.service.GetDonationDetail(r.Context(), donationID)
 	if err != nil {
 		if errors.Is(err, ErrDonationNotFound) {
 			httperr.NotFound(w, r, "Donation record not found.")
@@ -406,7 +546,7 @@ func (h *Handler) handleGetDonation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(mapDonationToDetail(donation))
+	_ = json.NewEncoder(w).Encode(mapDetailRowToDetail(donation))
 }
 
 func (h *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {

@@ -5,8 +5,14 @@ SELECT cp.id, cp.zone_id, cp.title, cp.description, cp.objectives, cp.category,
        cp.target_amount, cp.target_units, cp.funded_units_count, cp.planted_units_count,
        cp.surviving_units_count, cp.replant_reserve_pct, cp.donation_start_date,
        cp.donation_end_date, cp.estimated_planting_date,
-       cz.name AS zone_name, cz.region AS zone_region, cz.province AS zone_province,
-       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude
+       cz.name AS zone_name, cz.name AS location_name, cz.region AS zone_region, cz.province AS zone_province,
+       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude,
+       cz.latitude AS latitude, cz.longitude AS longitude,
+       COALESCE((
+           SELECT COUNT(DISTINCT d.user_id) 
+           FROM donations d 
+           WHERE d.project_id = cp.id AND d.payment_status = 'paid'
+       ), 0)::bigint AS contributors_count
 FROM conservation_projects cp
 JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE cp.status = 'open_for_donation'
@@ -19,8 +25,14 @@ SELECT cp.id, cp.zone_id, cp.title, cp.description, cp.objectives, cp.category,
        cp.target_amount, cp.target_units, cp.funded_units_count, cp.planted_units_count,
        cp.surviving_units_count, cp.replant_reserve_pct, cp.donation_start_date,
        cp.donation_end_date, cp.estimated_planting_date,
-       cz.name AS zone_name, cz.region AS zone_region, cz.province AS zone_province,
-       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude
+       cz.name AS zone_name, cz.name AS location_name, cz.region AS zone_region, cz.province AS zone_province,
+       cz.ecosystem_type AS zone_ecosystem_type, cz.latitude AS zone_latitude, cz.longitude AS zone_longitude,
+       cz.latitude AS latitude, cz.longitude AS longitude,
+       COALESCE((
+           SELECT COUNT(DISTINCT d.user_id) 
+           FROM donations d 
+           WHERE d.project_id = cp.id AND d.payment_status = 'paid'
+       ), 0)::bigint AS contributors_count
 FROM conservation_projects cp
 JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE cp.id = $1
@@ -89,6 +101,17 @@ FROM media_evidences me
 JOIN coral_fragments cf ON me.coral_fragment_id = cf.id
 WHERE me.coral_fragment_id = $1
 ORDER BY me.milestone_month ASC;
+
+-- name: ListUserAdoptedDonationUnits :many
+SELECT d.id, d.unit_quantity, d.created_at, d.paid_at,
+       cp.id AS project_id, cp.title AS project_title, cp.category::text AS project_category,
+       cp.species_or_type_name AS species_name, cp.image_url AS project_image_url,
+       cz.name AS location_name
+FROM donations d
+JOIN conservation_projects cp ON d.project_id = cp.id
+JOIN conservation_zones cz ON cp.zone_id = cz.id
+WHERE d.user_id = $1 AND d.payment_status = 'paid' AND cp.category != 'coral'
+ORDER BY d.paid_at DESC;
 
 -- name: ListNewsArticles :many
 SELECT id, title, category, summary, content, thumbnail_url, is_featured, published_at, created_at

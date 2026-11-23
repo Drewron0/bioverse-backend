@@ -160,6 +160,11 @@ func (s *Service) ListCoralMilestones(ctx context.Context, fragmentID uuid.UUID)
 	return s.store.ListCoralMilestonesByFragmentID(ctx, pgtype.UUID{Bytes: fragmentID, Valid: true})
 }
 
+// ListUserAdoptedDonationUnits returns non-coral adopted units for the given user.
+func (s *Service) ListUserAdoptedDonationUnits(ctx context.Context, userID uuid.UUID) ([]store.ListUserAdoptedDonationUnitsRow, error) {
+	return s.store.ListUserAdoptedDonationUnits(ctx, userID)
+}
+
 // GetImpactSummary retrieves platform-wide restoration metrics.
 func (s *Service) GetImpactSummary(ctx context.Context) (*store.GetPlatformImpactSummaryRow, error) {
 	res, err := s.store.GetPlatformImpactSummary(ctx)

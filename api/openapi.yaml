@@ -9,12 +9,10 @@ info:
     name: Proprietary / BioVerse Commercial License
     url: https://bioverse.id/legal/license
 servers:
+  - url: https://api.ourprojects.my.id
+    description: Production environment
   - url: http://localhost:8080
     description: Local development environment
-  - url: https://staging-api.bioverse.id
-    description: Staging environment
-  - url: https://api.bioverse.id
-    description: Production environment (AWS ECS)
 
 tags:
   - name: Health
@@ -407,6 +405,29 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/app/users/me/stats:
+    get:
+      tags:
+        - User Profile
+      summary: Get user eco metrics and activity statistics
+      description: Retrieves aggregated metrics of total donations (USD/IDR), adopted units, completed missions, points, and streaks.
+      operationId: getCurrentUserStats
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStats'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/app/users/fcm-token:
     post:
       tags:
@@ -443,7 +464,7 @@ paths:
       tags:
         - Notifications
       summary: List user notifications
-      description: Retrieves recent in-app notifications for the authenticated user.
+      description: Retrieves recent in-app notifications for the authenticated user with cursor-based pagination.
       operationId: listUserNotifications
       security:
         - BearerAuth: []
@@ -456,15 +477,19 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: RFC3339 timestamp cursor for pagination
+          schema:
+            type: string
       responses:
         '200':
           description: List of user notifications
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/NotificationItem'
+                $ref: '#/components/schemas/NotificationListResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
         '500':
@@ -731,6 +756,29 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/app/conservation/units/my:
+    get:
+      tags:
+        - Conservation
+      summary: List all user-adopted conservation units
+      description: Retrieves all conservation units adopted by the user (corals, mangroves, trees) with progressive milestone photos and monitoring timeline.
+      operationId: listMyConservationUnits
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of user-adopted conservation units
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConservationUnit'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/app/conservation/corals/{id}:
     get:
       tags:
@@ -969,6 +1017,28 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/app/pets/species:
+    get:
+      tags:
+        - Virtual Pets
+      summary: List available companion species
+      description: Retrieves available Ridge-to-Reef companion species metadata including element, description, and avatar asset URL.
+      operationId: listCompanionSpecies
+      security: []
+      responses:
+        '200':
+          description: List of companion species
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CompanionSpecies'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/app/pets:
     get:
       tags:
@@ -1081,7 +1151,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PetInteractionResponse'
+                $ref: '#/components/schemas/VirtualPet'
         '400':
           $ref: '#/components/responses/BadRequestError'
         '401':
@@ -1207,6 +1277,42 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '429':
           $ref: '#/components/responses/TooManyRequestsError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/app/mission-submissions/my:
+    get:
+      tags:
+        - Eco-Missions
+      summary: List user mission proof submissions
+      description: Retrieves user mission proof submissions with verification status and AI confidence score.
+      operationId: listMyMissionSubmissions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of mission submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MissionSubmissionItem'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3146,6 +3252,7 @@ components:
       enum:
         - coral_adoption
         - tree_planting
+        - mangrove_planting
         - bio_shield_addon
         - maintenance
         - general_support
@@ -3613,9 +3720,49 @@ components:
         is_email_verified:
           type: boolean
           example: true
+        current_streak:
+          type: integer
+          example: 5
         created_at:
           type: string
           format: date-time
+
+    UserStats:
+      type: object
+      required:
+        - user_id
+        - current_points
+        - current_streak
+        - longest_streak
+        - total_donations_usd
+        - total_donations_idr
+        - total_units_adopted
+        - missions_completed
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        current_points:
+          type: integer
+          example: 250
+        current_streak:
+          type: integer
+          example: 5
+        longest_streak:
+          type: integer
+          example: 12
+        total_donations_usd:
+          type: string
+          example: "45.00"
+        total_donations_idr:
+          type: string
+          example: "720000.00"
+        total_units_adopted:
+          type: integer
+          example: 3
+        missions_completed:
+          type: integer
+          example: 8
 
     UpdateUserProfileRequest:
       type: object
@@ -3891,6 +4038,23 @@ components:
           example: "2026-06-01"
         image_url:
           type: string
+        location_name:
+          type: string
+          nullable: true
+          example: Bunaken National Park
+        latitude:
+          type: number
+          format: double
+          nullable: true
+          example: 1.621
+        longitude:
+          type: number
+          format: double
+          nullable: true
+          example: 124.758
+        contributors_count:
+          type: integer
+          example: 42
         is_urgent:
           type: boolean
           description: Computed flag indicating < 30 days remaining or > 80% funded
@@ -4001,6 +4165,109 @@ components:
         verified_at:
           type: string
           format: date-time
+
+    ConservationUnitMilestone:
+      type: object
+      required:
+        - milestone_month
+        - milestone_title
+        - media_url
+        - is_verified_healthy
+        - health_status
+        - captured_at
+      properties:
+        milestone_month:
+          type: integer
+          example: 1
+        milestone_title:
+          type: string
+          example: Month 1 Progress
+        media_url:
+          type: string
+          format: uri
+        is_verified_healthy:
+          type: boolean
+          example: true
+        health_status:
+          type: string
+          example: healthy
+        subtitle_metrics:
+          type: string
+          nullable: true
+          example: "Growth: +1.2 cm | Temp: 28.5C"
+        captured_at:
+          type: string
+          format: date-time
+
+    ConservationUnit:
+      type: object
+      required:
+        - id
+        - unit_code
+        - category
+        - project_id
+        - project_name
+        - species_name
+        - location_name
+        - quantity
+        - lifecycle_status
+        - health_status
+        - created_at
+        - milestones
+      properties:
+        id:
+          type: string
+          format: uuid
+        unit_code:
+          type: string
+          example: TAG-BNK-A12-04
+        nickname:
+          type: string
+          nullable: true
+          example: Coralina
+        category:
+          type: string
+          example: coral_restoration
+        project_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+          example: Bunaken Marine Park Coral Restoration
+        species_name:
+          type: string
+          example: Acropora Cervicornis
+        location_name:
+          type: string
+          example: Bunaken National Park
+        quantity:
+          type: integer
+          example: 1
+        lifecycle_status:
+          type: string
+          example: planted
+        health_status:
+          type: string
+          example: healthy
+        spider_frame_tag:
+          type: string
+          nullable: true
+          example: BNK-FRAME-001
+        latest_photo_url:
+          type: string
+          format: uri
+          nullable: true
+        planted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConservationUnitMilestone'
 
     DonationCheckoutRequest:
       type: object
@@ -4171,6 +4438,28 @@ components:
           type: integer
         payment_method_type:
           $ref: '#/components/schemas/PaymentMethodType'
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        project_title:
+          type: string
+          nullable: true
+          example: Bunaken Marine Park Coral Restoration
+        project_category:
+          type: string
+          nullable: true
+          example: coral_restoration
+        image_url:
+          type: string
+          nullable: true
+        location_name:
+          type: string
+          nullable: true
+          example: Bunaken National Park
+        quantity:
+          type: integer
+          example: 1
         is_anonymous:
           type: boolean
         payment_details:
@@ -4244,12 +4533,45 @@ components:
         health_percent:
           type: integer
           example: 85
+        xp_to_next_level:
+          type: integer
+          example: 50
         is_primary:
           type: boolean
           example: true
         created_at:
           type: string
           format: date-time
+
+    CompanionSpecies:
+      type: object
+      required:
+        - species_id
+        - name
+        - description
+        - avatar_asset_url
+        - element
+        - rarity
+      properties:
+        species_id:
+          type: string
+          example: turtle
+        name:
+          type: string
+          example: Penyu Hijau (Sea Turtle)
+        description:
+          type: string
+          example: Penjaga terumbu karang yang tenang, tangguh mengarungi samudera luas.
+        avatar_asset_url:
+          type: string
+          format: uri
+          example: https://images.unsplash.com/photo-1544551763-46a013bb70d5
+        element:
+          type: string
+          example: ocean
+        rarity:
+          type: string
+          example: common
 
     CreatePetRequest:
       type: object
@@ -4291,30 +4613,6 @@ components:
           enum: [feed, clean, pet]
           example: feed
 
-    PetInteractionResponse:
-      type: object
-      required:
-        - pet_id
-        - interaction_type
-        - health_percent
-        - experience_points
-        - level
-      properties:
-        pet_id:
-          type: string
-          format: uuid
-        interaction_type:
-          type: string
-        health_percent:
-          type: integer
-          example: 100
-        experience_points:
-          type: integer
-          example: 480
-        level:
-          type: integer
-          example: 3
-
     EcoMission:
       type: object
       required:
@@ -4350,6 +4648,28 @@ components:
         difficulty:
           type: string
           example: easy
+        image_url:
+          type: string
+          nullable: true
+          example: https://images.unsplash.com/photo-1544816155-12df9643f363
+        requires_camera_proof:
+          type: boolean
+          default: true
+          example: true
+        cv_target_label:
+          type: string
+          nullable: true
+          example: reusable_water_bottle
+        estimated_minutes:
+          type: integer
+          example: 5
+        completed_today:
+          type: boolean
+          example: false
+        my_last_submission_status:
+          type: string
+          nullable: true
+          example: approved
 
     PaginatedEcoMissions:
       type: object
@@ -4433,6 +4753,63 @@ components:
         created_at:
           type: string
           format: date-time
+
+    MissionSubmissionItem:
+      type: object
+      required:
+        - id
+        - mission_id
+        - mission_title
+        - mission_category
+        - proof_image_url
+        - status
+        - awarded_points
+        - awarded_xp
+        - submitted_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        mission_id:
+          type: string
+          format: uuid
+        mission_title:
+          type: string
+          example: Reusable Water Bottle Refill
+        mission_category:
+          type: string
+          example: waste_reduction
+        pet_id:
+          type: string
+          format: uuid
+          nullable: true
+        proof_image_url:
+          type: string
+          format: uri
+          example: https://images.unsplash.com/photo-1544816155-12df9643f363
+        status:
+          type: string
+          example: approved
+        awarded_points:
+          type: integer
+          example: 50
+        awarded_xp:
+          type: integer
+          example: 75
+        cv_confidence_score:
+          type: number
+          nullable: true
+          example: 0.95
+        rejection_reason:
+          type: string
+          nullable: true
+        submitted_at:
+          type: string
+          format: date-time
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
 
     UserStreak:
       type: object
@@ -5257,6 +5634,20 @@ components:
         created_at:
           type: string
           format: date-time
+
+    NotificationListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationItem'
+        next_cursor:
+          type: string
+          nullable: true
+          example: "2026-11-22T08:00:00Z"
 
     CorporateDashboard:
       type: object

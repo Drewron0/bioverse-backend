@@ -250,10 +250,119 @@ func (q *Queries) GetDonationByIdempotencyKey(ctx context.Context, idempotencyKe
 	return i, err
 }
 
-const listDonationsByUserID = `-- name: ListDonationsByUserID :many
-SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, cp.title AS project_title
+const getDonationDetailByID = `-- name: GetDonationDetailByID :one
+SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, 
+       cp.title AS project_title,
+       cp.category::text AS project_category,
+       cp.image_url AS project_image_url,
+       cz.name AS project_location_name
 FROM donations d
-JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_zones cz ON cp.zone_id = cz.id
+WHERE d.id = $1
+LIMIT 1
+`
+
+type GetDonationDetailByIDRow struct {
+	ID                       uuid.UUID          `json:"id"`
+	IdempotencyKey           string             `json:"idempotency_key"`
+	UserID                   uuid.UUID          `json:"user_id"`
+	ProjectID                uuid.UUID          `json:"project_id"`
+	SubscriptionID           pgtype.UUID        `json:"subscription_id"`
+	SponsoredQuotaID         pgtype.UUID        `json:"sponsored_quota_id"`
+	CycleNumber              pgtype.Int4        `json:"cycle_number"`
+	DonationType             DonationType       `json:"donation_type"`
+	IsAnonymous              bool               `json:"is_anonymous"`
+	UnitQuantity             int32              `json:"unit_quantity"`
+	CurrencyCode             string             `json:"currency_code"`
+	GrossProjectValue        pgtype.Numeric     `json:"gross_project_value"`
+	MoneyAmountPaid          pgtype.Numeric     `json:"money_amount_paid"`
+	SettlementCurrencyCode   string             `json:"settlement_currency_code"`
+	SettlementAmount         pgtype.Numeric     `json:"settlement_amount"`
+	FxRateSnapshot           pgtype.Numeric     `json:"fx_rate_snapshot"`
+	GatewayFeeSettlement     pgtype.Numeric     `json:"gateway_fee_settlement"`
+	MoneyPaymentMethod       PaymentMethodType  `json:"money_payment_method"`
+	PaymentProvider          string             `json:"payment_provider"`
+	IsMixedPayment           bool               `json:"is_mixed_payment"`
+	BankCode                 pgtype.Text        `json:"bank_code"`
+	VaNumber                 pgtype.Text        `json:"va_number"`
+	QrisPayload              pgtype.Text        `json:"qris_payload"`
+	PointsUsed               int64              `json:"points_used"`
+	PointsRateSnapshot       pgtype.Numeric     `json:"points_rate_snapshot"`
+	PointsMonetaryEquivalent pgtype.Numeric     `json:"points_monetary_equivalent"`
+	IsPointsLocked           bool               `json:"is_points_locked"`
+	PaymentStatus            PaymentStatus      `json:"payment_status"`
+	ExternalGatewayRef       pgtype.Text        `json:"external_gateway_ref"`
+	PaidAt                   pgtype.Timestamptz `json:"paid_at"`
+	ExpiredAt                pgtype.Timestamptz `json:"expired_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetPetID              pgtype.UUID        `json:"target_pet_id"`
+	CoralNickname            pgtype.Text        `json:"coral_nickname"`
+	IncludeBioShield         bool               `json:"include_bio_shield"`
+	PaymentUrl               pgtype.Text        `json:"payment_url"`
+	ProjectTitle             pgtype.Text        `json:"project_title"`
+	ProjectCategory          string             `json:"project_category"`
+	ProjectImageUrl          pgtype.Text        `json:"project_image_url"`
+	ProjectLocationName      pgtype.Text        `json:"project_location_name"`
+}
+
+func (q *Queries) GetDonationDetailByID(ctx context.Context, id uuid.UUID) (GetDonationDetailByIDRow, error) {
+	row := q.db.QueryRow(ctx, getDonationDetailByID, id)
+	var i GetDonationDetailByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.IdempotencyKey,
+		&i.UserID,
+		&i.ProjectID,
+		&i.SubscriptionID,
+		&i.SponsoredQuotaID,
+		&i.CycleNumber,
+		&i.DonationType,
+		&i.IsAnonymous,
+		&i.UnitQuantity,
+		&i.CurrencyCode,
+		&i.GrossProjectValue,
+		&i.MoneyAmountPaid,
+		&i.SettlementCurrencyCode,
+		&i.SettlementAmount,
+		&i.FxRateSnapshot,
+		&i.GatewayFeeSettlement,
+		&i.MoneyPaymentMethod,
+		&i.PaymentProvider,
+		&i.IsMixedPayment,
+		&i.BankCode,
+		&i.VaNumber,
+		&i.QrisPayload,
+		&i.PointsUsed,
+		&i.PointsRateSnapshot,
+		&i.PointsMonetaryEquivalent,
+		&i.IsPointsLocked,
+		&i.PaymentStatus,
+		&i.ExternalGatewayRef,
+		&i.PaidAt,
+		&i.ExpiredAt,
+		&i.CreatedAt,
+		&i.TargetPetID,
+		&i.CoralNickname,
+		&i.IncludeBioShield,
+		&i.PaymentUrl,
+		&i.ProjectTitle,
+		&i.ProjectCategory,
+		&i.ProjectImageUrl,
+		&i.ProjectLocationName,
+	)
+	return i, err
+}
+
+const listDonationsByUserID = `-- name: ListDonationsByUserID :many
+SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, 
+       cp.title AS project_title,
+       cp.category::text AS project_category,
+       cp.image_url AS project_image_url,
+       cz.name AS project_location_name
+FROM donations d
+LEFT JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE d.user_id = $1
 ORDER BY d.created_at DESC
 `
@@ -295,7 +404,10 @@ type ListDonationsByUserIDRow struct {
 	CoralNickname            pgtype.Text        `json:"coral_nickname"`
 	IncludeBioShield         bool               `json:"include_bio_shield"`
 	PaymentUrl               pgtype.Text        `json:"payment_url"`
-	ProjectTitle             string             `json:"project_title"`
+	ProjectTitle             pgtype.Text        `json:"project_title"`
+	ProjectCategory          string             `json:"project_category"`
+	ProjectImageUrl          pgtype.Text        `json:"project_image_url"`
+	ProjectLocationName      pgtype.Text        `json:"project_location_name"`
 }
 
 func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) ([]ListDonationsByUserIDRow, error) {
@@ -345,6 +457,9 @@ func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) (
 			&i.IncludeBioShield,
 			&i.PaymentUrl,
 			&i.ProjectTitle,
+			&i.ProjectCategory,
+			&i.ProjectImageUrl,
+			&i.ProjectLocationName,
 		); err != nil {
 			return nil, err
 		}
@@ -357,9 +472,14 @@ func (q *Queries) ListDonationsByUserID(ctx context.Context, userID uuid.UUID) (
 }
 
 const listDonationsByUserIDWithCursor = `-- name: ListDonationsByUserIDWithCursor :many
-SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, cp.title AS project_title
+SELECT d.id, d.idempotency_key, d.user_id, d.project_id, d.subscription_id, d.sponsored_quota_id, d.cycle_number, d.donation_type, d.is_anonymous, d.unit_quantity, d.currency_code, d.gross_project_value, d.money_amount_paid, d.settlement_currency_code, d.settlement_amount, d.fx_rate_snapshot, d.gateway_fee_settlement, d.money_payment_method, d.payment_provider, d.is_mixed_payment, d.bank_code, d.va_number, d.qris_payload, d.points_used, d.points_rate_snapshot, d.points_monetary_equivalent, d.is_points_locked, d.payment_status, d.external_gateway_ref, d.paid_at, d.expired_at, d.created_at, d.target_pet_id, d.coral_nickname, d.include_bio_shield, d.payment_url, 
+       cp.title AS project_title,
+       cp.category::text AS project_category,
+       cp.image_url AS project_image_url,
+       cz.name AS project_location_name
 FROM donations d
-JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE d.user_id = $1
   AND ($3::timestamptz IS NULL OR d.created_at < $3::timestamptz)
 ORDER BY d.created_at DESC
@@ -409,7 +529,10 @@ type ListDonationsByUserIDWithCursorRow struct {
 	CoralNickname            pgtype.Text        `json:"coral_nickname"`
 	IncludeBioShield         bool               `json:"include_bio_shield"`
 	PaymentUrl               pgtype.Text        `json:"payment_url"`
-	ProjectTitle             string             `json:"project_title"`
+	ProjectTitle             pgtype.Text        `json:"project_title"`
+	ProjectCategory          string             `json:"project_category"`
+	ProjectImageUrl          pgtype.Text        `json:"project_image_url"`
+	ProjectLocationName      pgtype.Text        `json:"project_location_name"`
 }
 
 func (q *Queries) ListDonationsByUserIDWithCursor(ctx context.Context, arg ListDonationsByUserIDWithCursorParams) ([]ListDonationsByUserIDWithCursorRow, error) {
@@ -459,6 +582,9 @@ func (q *Queries) ListDonationsByUserIDWithCursor(ctx context.Context, arg ListD
 			&i.IncludeBioShield,
 			&i.PaymentUrl,
 			&i.ProjectTitle,
+			&i.ProjectCategory,
+			&i.ProjectImageUrl,
+			&i.ProjectLocationName,
 		); err != nil {
 			return nil, err
 		}

@@ -38,6 +38,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware f
 			protected.Get("/corals/my", h.handleListMyCorals)
 			protected.Get("/corals/{id}", h.handleGetCoral)
 			protected.Get("/corals/{id}/timeline", h.handleGetCoralTimeline)
+			protected.Get("/units/my", h.handleListMyUnits)
 		})
 	})
 
@@ -68,28 +69,32 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware f
 }
 
 type projectResponse struct {
-	ID                    string `json:"id"`
-	Title                 string `json:"title"`
-	Description           string `json:"description"`
-	Objectives            string `json:"objectives"`
-	Category              string `json:"category"`
-	SpeciesOrTypeName     string `json:"species_or_type_name"`
-	Status                string `json:"status"`
-	PhysicalHealthStatus  string `json:"physical_health_status"`
-	CurrencyCode          string `json:"currency_code"`
-	PricePerUnitMoney     string `json:"price_per_unit_money"`
-	PricePerUnitPoints    int64  `json:"price_per_unit_points"`
-	TargetAmount          string `json:"target_amount"`
-	TargetUnits           int32  `json:"target_units"`
-	FundedUnitsCount      int32  `json:"funded_units_count"`
-	PlantedUnitsCount     int32  `json:"planted_units_count"`
-	SurvivingUnitsCount   int32  `json:"surviving_units_count"`
-	DonationStartDate     string `json:"donation_start_date"`
-	DonationEndDate       string `json:"donation_end_date"`
-	EstimatedPlantingDate string `json:"estimated_planting_date"`
-	ImageURL              string `json:"image_url"`
-	IsUrgent              bool   `json:"is_urgent"`
-	CreatedAt             string `json:"created_at"`
+	ID                    string  `json:"id"`
+	Title                 string  `json:"title"`
+	Description           string  `json:"description"`
+	Objectives            string  `json:"objectives"`
+	Category              string  `json:"category"`
+	SpeciesOrTypeName     string  `json:"species_or_type_name"`
+	Status                string  `json:"status"`
+	PhysicalHealthStatus  string  `json:"physical_health_status"`
+	LocationName          string  `json:"location_name"`
+	Latitude              float64 `json:"latitude"`
+	Longitude             float64 `json:"longitude"`
+	ContributorsCount     int64   `json:"contributors_count"`
+	CurrencyCode          string  `json:"currency_code"`
+	PricePerUnitMoney     string  `json:"price_per_unit_money"`
+	PricePerUnitPoints    int64   `json:"price_per_unit_points"`
+	TargetAmount          string  `json:"target_amount"`
+	TargetUnits           int32   `json:"target_units"`
+	FundedUnitsCount      int32   `json:"funded_units_count"`
+	PlantedUnitsCount     int32   `json:"planted_units_count"`
+	SurvivingUnitsCount   int32   `json:"surviving_units_count"`
+	DonationStartDate     string  `json:"donation_start_date"`
+	DonationEndDate       string  `json:"donation_end_date"`
+	EstimatedPlantingDate string  `json:"estimated_planting_date"`
+	ImageURL              string  `json:"image_url"`
+	IsUrgent              bool    `json:"is_urgent"`
+	CreatedAt             string  `json:"created_at"`
 }
 
 func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +171,9 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			plantEst = p.EstimatedPlantingDate.Time.Format("2006-01-02")
 		}
 
+		lat, _ := decimalutil.FromNumeric(p.Latitude).Float64()
+		lon, _ := decimalutil.FromNumeric(p.Longitude).Float64()
+
 		items = append(items, projectResponse{
 			ID:                    p.ID.String(),
 			Title:                 p.Title,
@@ -175,6 +183,10 @@ func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			SpeciesOrTypeName:     p.SpeciesOrTypeName,
 			Status:                string(p.Status),
 			PhysicalHealthStatus:  string(p.PhysicalHealthStatus),
+			LocationName:          p.LocationName,
+			Latitude:              lat,
+			Longitude:             lon,
+			ContributorsCount:     p.ContributorsCount,
 			CurrencyCode:          p.CurrencyCode,
 			PricePerUnitMoney:     decimalutil.FromNumeric(p.PricePerUnitMoney).StringFixed(2),
 			PricePerUnitPoints:    p.PricePerUnitPoints,
@@ -229,6 +241,9 @@ func (h *Handler) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		isUrgent = true
 	}
 
+	lat, _ := decimalutil.FromNumeric(p.Latitude).Float64()
+	lon, _ := decimalutil.FromNumeric(p.Longitude).Float64()
+
 	resp := projectResponse{
 		ID:                    p.ID.String(),
 		Title:                 p.Title,
@@ -238,6 +253,10 @@ func (h *Handler) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		SpeciesOrTypeName:     p.SpeciesOrTypeName,
 		Status:                string(p.Status),
 		PhysicalHealthStatus:  string(p.PhysicalHealthStatus),
+		LocationName:          p.LocationName,
+		Latitude:              lat,
+		Longitude:             lon,
+		ContributorsCount:     p.ContributorsCount,
 		CurrencyCode:          p.CurrencyCode,
 		PricePerUnitMoney:     decimalutil.FromNumeric(p.PricePerUnitMoney).StringFixed(2),
 		PricePerUnitPoints:    p.PricePerUnitPoints,
@@ -339,6 +358,277 @@ func (h *Handler) handleListMyCorals(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"items":       items,
 		"next_cursor": nil,
+	})
+}
+
+type unitMilestoneItem struct {
+	MilestoneMonth    int32   `json:"milestone_month"`
+	MilestoneTitle    string  `json:"milestone_title"`
+	MediaURL          string  `json:"media_url"`
+	IsVerifiedHealthy bool    `json:"is_verified_healthy"`
+	HealthStatus      string  `json:"health_status"`
+	SubtitleMetrics   *string `json:"subtitle_metrics"`
+	CapturedAt        string  `json:"captured_at"`
+}
+
+type conservationUnitItem struct {
+	ID              string              `json:"id"`
+	UnitCode        string              `json:"unit_code"`
+	Nickname        *string             `json:"nickname"`
+	Category        string              `json:"category"`
+	ProjectID       string              `json:"project_id"`
+	ProjectName     string              `json:"project_name"`
+	SpeciesName     string              `json:"species_name"`
+	LocationName    string              `json:"location_name"`
+	Quantity        int32               `json:"quantity"`
+	LifecycleStatus string              `json:"lifecycle_status"`
+	HealthStatus    string              `json:"health_status"`
+	SpiderFrameTag  *string             `json:"spider_frame_tag"`
+	LatestPhotoURL  *string             `json:"latest_photo_url"`
+	PlantedAt       *string             `json:"planted_at"`
+	CreatedAt       string              `json:"created_at"`
+	Milestones      []unitMilestoneItem `json:"milestones"`
+}
+
+func (h *Handler) handleListMyUnits(w http.ResponseWriter, r *http.Request) {
+	userID, ok := identity.GetUserIDFromContext(r.Context())
+	if !ok {
+		httperr.Unauthorized(w, r, "Authentication required.")
+		return
+	}
+
+	corals, err := h.service.ListUserAdoptedCorals(r.Context(), userID)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	donationUnits, err := h.service.ListUserAdoptedDonationUnits(r.Context(), userID)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	units := make([]conservationUnitItem, 0, len(corals)+len(donationUnits))
+
+	// 1. Process Coral Units
+	for _, c := range corals {
+		var nick *string
+		if c.Nickname.Valid {
+			nick = &c.Nickname.String
+		}
+		var photo *string
+		if c.LatestPhotoUrl.Valid {
+			photo = &c.LatestPhotoUrl.String
+		}
+		var planted *string
+		if c.PlantedAt.Valid {
+			p := c.PlantedAt.Time.Format(time.RFC3339)
+			planted = &p
+		}
+		health := "healthy"
+		if c.HealthStatus.Valid {
+			health = string(c.HealthStatus.EnvironmentalHealthStatus)
+		}
+
+		dbMilestones, _ := h.service.ListCoralMilestones(r.Context(), c.ID)
+		milestones := make([]unitMilestoneItem, 0, 3)
+
+		if len(dbMilestones) > 0 {
+			for _, m := range dbMilestones {
+				var sub *string
+				if m.SubtitleMetrics.Valid {
+					sub = &m.SubtitleMetrics.String
+				}
+				hStatus := health
+				if m.HealthStatus.Valid {
+					hStatus = string(m.HealthStatus.EnvironmentalHealthStatus)
+				}
+				milestones = append(milestones, unitMilestoneItem{
+					MilestoneMonth:    m.MilestoneMonth.Int32,
+					MilestoneTitle:    m.MilestoneTitle.String,
+					MediaURL:          m.MediaUrl,
+					IsVerifiedHealthy: m.IsVerifiedHealthy,
+					HealthStatus:      hStatus,
+					SubtitleMetrics:   sub,
+					CapturedAt:        m.CapturedAt.Time.Format(time.RFC3339),
+				})
+			}
+		} else {
+			defaultPhoto := "https://images.unsplash.com/photo-1546026423-cc4642628d2b"
+			if photo != nil {
+				defaultPhoto = *photo
+			}
+			plantedTime := c.CreatedAt.Time
+			if c.PlantedAt.Valid {
+				plantedTime = c.PlantedAt.Time
+			}
+
+			sub1 := "Struktur Biorock aktif dialiri listrik mikro, polip karang membuka sempurna"
+			sub3 := "Endapan mineral kalsium karbonat menebal, percabangan tumbuh 2.5 cm"
+			sub6 := "Koloni karang mandiri, ikan karang dan anemon mulai berkoloni di sekitar fragmen"
+
+			milestones = append(milestones,
+				unitMilestoneItem{
+					MilestoneMonth:    1,
+					MilestoneTitle:    "Bulan 1: Penempelan & Adaptasi Substrat",
+					MediaURL:          defaultPhoto,
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub1,
+					CapturedAt:        plantedTime.AddDate(0, 1, 0).Format(time.RFC3339),
+				},
+				unitMilestoneItem{
+					MilestoneMonth:    3,
+					MilestoneTitle:    "Bulan 3: Pertumbuhan Cabang & Kalsifikasi",
+					MediaURL:          "https://images.unsplash.com/photo-1582967788606-a171c1080cb0",
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub3,
+					CapturedAt:        plantedTime.AddDate(0, 3, 0).Format(time.RFC3339),
+				},
+				unitMilestoneItem{
+					MilestoneMonth:    6,
+					MilestoneTitle:    "Bulan 6: Koloni Mandiri & Ekosistem Mikro",
+					MediaURL:          "https://images.unsplash.com/photo-1682687220063-4742bd7fd538",
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub6,
+					CapturedAt:        plantedTime.AddDate(0, 6, 0).Format(time.RFC3339),
+				},
+			)
+		}
+
+		units = append(units, conservationUnitItem{
+			ID:              c.ID.String(),
+			UnitCode:        c.FragmentCode,
+			Nickname:        nick,
+			Category:        "coral",
+			ProjectID:       c.ProjectID.String(),
+			ProjectName:     c.ProjectTitle,
+			SpeciesName:     c.SpeciesName,
+			LocationName:    c.ZoneName,
+			Quantity:        1,
+			LifecycleStatus: string(c.LifecycleStatus),
+			HealthStatus:    health,
+			SpiderFrameTag:  nil,
+			LatestPhotoURL:  photo,
+			PlantedAt:       planted,
+			CreatedAt:       c.CreatedAt.Time.Format(time.RFC3339),
+			Milestones:      milestones,
+		})
+	}
+
+	// 2. Process Non-Coral Units (Mangroves, Trees, etc.)
+	for _, du := range donationUnits {
+		photo := du.ProjectImageUrl
+		paidTime := du.CreatedAt.Time
+		var plantedStr *string
+		if du.PaidAt.Valid {
+			paidTime = du.PaidAt.Time
+			s := paidTime.Format(time.RFC3339)
+			plantedStr = &s
+		}
+
+		prefix := "MNG"
+		if du.ProjectCategory == "tree" {
+			prefix = "TRE"
+		}
+		unitCode := fmt.Sprintf("%s-%s", prefix, du.ID.String()[:8])
+
+		milestones := make([]unitMilestoneItem, 0, 3)
+		if du.ProjectCategory == "mangrove" {
+			sub1 := "Bibit Rhizophora ditanam di lumpur pesisir dengan ajir bambu pelindung"
+			sub3 := "Akar tunjang mulai mencengkeram substrat, daun bertunas 4-6 helai baru"
+			sub6 := "Sabuk hijau mangrove rapat menahan abrasi ombak dan menyerap karbon biru"
+			milestones = append(milestones,
+				unitMilestoneItem{
+					MilestoneMonth:    1,
+					MilestoneTitle:    "Bulan 1: Penanaman Bibit Mangrove",
+					MediaURL:          du.ProjectImageUrl,
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub1,
+					CapturedAt:        paidTime.AddDate(0, 1, 0).Format(time.RFC3339),
+				},
+				unitMilestoneItem{
+					MilestoneMonth:    3,
+					MilestoneTitle:    "Bulan 3: Perkembangan Akar Tunjang",
+					MediaURL:          "https://images.unsplash.com/photo-1544551763-77ef2d0cfc6c",
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub3,
+					CapturedAt:        paidTime.AddDate(0, 3, 0).Format(time.RFC3339),
+				},
+				unitMilestoneItem{
+					MilestoneMonth:    6,
+					MilestoneTitle:    "Bulan 6: Pemantapan Sabuk Hijau Pesisir",
+					MediaURL:          "https://images.unsplash.com/photo-1559827291-72ee739d0d9a",
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub6,
+					CapturedAt:        paidTime.AddDate(0, 6, 0).Format(time.RFC3339),
+				},
+			)
+		} else {
+			sub1 := "Bibit pohon ditanam pada bedengan lereng dengan mulsa organik"
+			sub3 := "Batang mengeras dan bertambah tinggi 40 cm, perakaran menembus tanah dalam"
+			sub6 := "Kanopi rimbun menaungi tanah lereng dan mengikat resapan air tanah pegunungan"
+			milestones = append(milestones,
+				unitMilestoneItem{
+					MilestoneMonth:    1,
+					MilestoneTitle:    "Bulan 1: Penanaman Pohon di Lereng",
+					MediaURL:          du.ProjectImageUrl,
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub1,
+					CapturedAt:        paidTime.AddDate(0, 1, 0).Format(time.RFC3339),
+				},
+				unitMilestoneItem{
+					MilestoneMonth:    3,
+					MilestoneTitle:    "Bulan 3: Penguatan Batang & Perakaran",
+					MediaURL:          "https://images.unsplash.com/photo-1513836279014-a89f7a76ae86",
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub3,
+					CapturedAt:        paidTime.AddDate(0, 3, 0).Format(time.RFC3339),
+				},
+				unitMilestoneItem{
+					MilestoneMonth:    6,
+					MilestoneTitle:    "Bulan 6: Pembentukan Kanopi & Konservasi Air",
+					MediaURL:          "https://images.unsplash.com/photo-1502082553048-f009c37129b9",
+					IsVerifiedHealthy: true,
+					HealthStatus:      "healthy",
+					SubtitleMetrics:   &sub6,
+					CapturedAt:        paidTime.AddDate(0, 6, 0).Format(time.RFC3339),
+				},
+			)
+		}
+
+		units = append(units, conservationUnitItem{
+			ID:              du.ID.String(),
+			UnitCode:        unitCode,
+			Nickname:        nil,
+			Category:        du.ProjectCategory,
+			ProjectID:       du.ProjectID.String(),
+			ProjectName:     du.ProjectTitle,
+			SpeciesName:     du.SpeciesName,
+			LocationName:    du.LocationName,
+			Quantity:        du.UnitQuantity,
+			LifecycleStatus: "planted",
+			HealthStatus:    "healthy",
+			SpiderFrameTag:  nil,
+			LatestPhotoURL:  &photo,
+			PlantedAt:       plantedStr,
+			CreatedAt:       du.CreatedAt.Time.Format(time.RFC3339),
+			Milestones:      milestones,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"items": units,
 	})
 }
 

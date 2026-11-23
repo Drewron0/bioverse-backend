@@ -142,9 +142,10 @@ func (v *HTTPCVVerifier) VerifyProof(ctx context.Context, targetLabel string, mi
 
 // Service coordinates virtual pet actions, streaks, eco-missions, and points.
 type Service struct {
-	pool       *pgxpool.Pool
-	store      store.Querier
-	cvVerifier ComputerVisionVerifier
+	pool          *pgxpool.Pool
+	store         store.Querier
+	cvVerifier    ComputerVisionVerifier
+	imageResolver func(string) string
 }
 
 // NewService constructs a gamification domain service.
@@ -157,6 +158,11 @@ func NewService(pool *pgxpool.Pool, q store.Querier, verifier ComputerVisionVeri
 		store:      q,
 		cvVerifier: verifier,
 	}
+}
+
+// SetImageResolver assigns a resolver function for translating object keys to downloadable URLs.
+func (s *Service) SetImageResolver(resolver func(string) string) {
+	s.imageResolver = resolver
 }
 
 // ListUserPets returns all virtual pets owned by the user.
@@ -291,6 +297,31 @@ func (s *Service) InteractWithPet(ctx context.Context, userID, petID uuid.UUID) 
 			return fmt.Errorf("failed to update pet after interaction: %w", err)
 		}
 
+		// Advance user daily streak
+		user, errUser := txStore.GetUserByID(ctx, userID)
+		if errUser == nil {
+			loc, errLoc := time.LoadLocation(user.Timezone)
+			if errLoc != nil {
+				loc = time.UTC
+			}
+			userToday := time.Now().In(loc)
+			todayDate := pgtype.Date{
+				Time:  time.Date(userToday.Year(), userToday.Month(), userToday.Day(), 0, 0, 0, 0, time.UTC),
+				Valid: true,
+			}
+			streak, errStreak := txStore.GetUserStreakByUserID(ctx, userID)
+			if errStreak == nil {
+				newStreak, longestStreak := calculateNewStreak(streak, todayDate.Time)
+				_, _ = txStore.UpdateUserStreak(ctx, store.UpdateUserStreakParams{
+					UserID:             userID,
+					CurrentStreak:      newStreak,
+					LongestStreak:      longestStreak,
+					LastStreakDate:     todayDate,
+					LastFreezeUsedDate: streak.LastFreezeUsedDate,
+				})
+			}
+		}
+
 		updatedPet = up
 		return nil
 	})
@@ -302,7 +333,7 @@ func (s *Service) InteractWithPet(ctx context.Context, userID, petID uuid.UUID) 
 }
 
 // ListActiveMissions returns all active eco-missions.
-func (s *Service) ListActiveMissions(ctx context.Context) ([]store.EcoMissions, error) {
+func (s *Service) ListActiveMissions(ctx context.Context) ([]store.ListActiveMissionsRow, error) {
 	return s.store.ListActiveMissions(ctx)
 }
 
@@ -399,9 +430,49 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 		minConfidence = decimal.NewFromFloat(0.80)
 	}
 
-	cvRes, err := s.cvVerifier.VerifyProof(ctx, targetLabel, minConfidence, proofImageURL)
-	if err != nil {
-		return nil, fmt.Errorf("computer vision service error: %w", err)
+	verifyURL := proofImageURL
+	if s.imageResolver != nil {
+		if resolved := s.imageResolver(proofImageURL); resolved != "" {
+			verifyURL = resolved
+		}
+	}
+
+	cvRes, cvErr := s.cvVerifier.VerifyProof(ctx, targetLabel, minConfidence, verifyURL)
+	if cvErr != nil {
+		// If external CV inference service is unavailable or unconfigured,
+		// do not fail with 500 error; save as needs_review for manual or deferred review.
+		submissionID, _ := uuid.NewV7()
+		imageHash := hashString(proofImageURL)
+		var result MissionSubmissionResult
+		result.SubmissionID = submissionID
+		result.MissionID = missionID
+		result.Status = store.SubmissionStatusNeedsReview
+
+		err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+			txStore := store.New(tx)
+			_, errSave := txStore.CreateMissionSubmission(ctx, store.CreateMissionSubmissionParams{
+				ID:                submissionID,
+				UserID:            userID,
+				MissionID:         missionID,
+				PetID:             uuidToPgUUID(targetPetID),
+				SubmissionDate:    todayDate,
+				ProofImageUrl:     pgtype.Text{String: proofImageURL, Valid: true},
+				ImageHash:         pgtype.Text{String: imageHash, Valid: true},
+				Status:            store.SubmissionStatusNeedsReview,
+				CvJobID:           pgtype.Text{String: "manual-review-fallback", Valid: true},
+				CvModelVersion:    pgtype.Text{String: "fallback", Valid: true},
+				CvConfidenceScore: decimalutil.ToNumeric(decimal.Zero),
+				CvRawResponse:     []byte(fmt.Sprintf(`{"fallback_reason": %q}`, cvErr.Error())),
+				AwardedPoints:     0,
+				AwardedXp:         0,
+				VerifiedAt:        pgtype.Timestamptz{Valid: false},
+			})
+			return errSave
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to save needs_review submission: %w", err)
+		}
+		return &result, nil
 	}
 
 	imageHash := hashString(proofImageURL)
@@ -674,6 +745,16 @@ func (s *Service) GetPointConversionRate(ctx context.Context) decimal.Decimal {
 }
 
 // Helpers
+
+// CalculateXPToNextLevel computes the remaining XP needed to achieve the subsequent level.
+func CalculateXPToNextLevel(xp int64, level int32) int64 {
+	nextLevelThreshold := int64(level) * int64(level) * 100
+	needed := nextLevelThreshold - xp
+	if needed < 0 {
+		return 0
+	}
+	return needed
+}
 
 func calculatePetLevel(xp int64) int32 {
 	if xp <= 0 {

@@ -22,6 +22,18 @@ SELECT * FROM donations
 WHERE id = $1
 LIMIT 1;
 
+-- name: GetDonationDetailByID :one
+SELECT d.*, 
+       cp.title AS project_title,
+       cp.category::text AS project_category,
+       cp.image_url AS project_image_url,
+       cz.name AS project_location_name
+FROM donations d
+LEFT JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_zones cz ON cp.zone_id = cz.id
+WHERE d.id = $1
+LIMIT 1;
+
 -- name: GetDonationByIdempotencyKey :one
 SELECT * FROM donations
 WHERE idempotency_key = $1
@@ -36,16 +48,26 @@ WHERE id = $1 AND (payment_status = 'pending' OR payment_status = $2)
 RETURNING *;
 
 -- name: ListDonationsByUserID :many
-SELECT d.*, cp.title AS project_title
+SELECT d.*, 
+       cp.title AS project_title,
+       cp.category::text AS project_category,
+       cp.image_url AS project_image_url,
+       cz.name AS project_location_name
 FROM donations d
-JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE d.user_id = $1
 ORDER BY d.created_at DESC;
 
 -- name: ListDonationsByUserIDWithCursor :many
-SELECT d.*, cp.title AS project_title
+SELECT d.*, 
+       cp.title AS project_title,
+       cp.category::text AS project_category,
+       cp.image_url AS project_image_url,
+       cz.name AS project_location_name
 FROM donations d
-JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_projects cp ON d.project_id = cp.id
+LEFT JOIN conservation_zones cz ON cp.zone_id = cz.id
 WHERE d.user_id = $1
   AND (sqlc.narg('cursor_created_at')::timestamptz IS NULL OR d.created_at < sqlc.narg('cursor_created_at')::timestamptz)
 ORDER BY d.created_at DESC

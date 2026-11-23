@@ -372,11 +372,12 @@ func (ns NullDigitalItemType) Value() (driver.Value, error) {
 type DonationType string
 
 const (
-	DonationTypeCoralAdoption  DonationType = "coral_adoption"
-	DonationTypeTreePlanting   DonationType = "tree_planting"
-	DonationTypeBioShieldAddon DonationType = "bio_shield_addon"
-	DonationTypeMaintenance    DonationType = "maintenance"
-	DonationTypeGeneralSupport DonationType = "general_support"
+	DonationTypeCoralAdoption    DonationType = "coral_adoption"
+	DonationTypeTreePlanting     DonationType = "tree_planting"
+	DonationTypeBioShieldAddon   DonationType = "bio_shield_addon"
+	DonationTypeMaintenance      DonationType = "maintenance"
+	DonationTypeGeneralSupport   DonationType = "general_support"
+	DonationTypeMangrovePlanting DonationType = "mangrove_planting"
 )
 
 func (e *DonationType) Scan(src interface{}) error {
@@ -1940,6 +1941,7 @@ type EcoMissions struct {
 	IsDaily             bool               `json:"is_daily"`
 	IsActive            bool               `json:"is_active"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	EstimatedMinutes    int32              `json:"estimated_minutes"`
 }
 
 type EsgAuditReports struct {
