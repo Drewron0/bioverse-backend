@@ -464,35 +464,35 @@ func (h *Handler) handleListMyUnits(w http.ResponseWriter, r *http.Request) {
 				plantedTime = c.PlantedAt.Time
 			}
 
-			sub1 := "Struktur Biorock aktif dialiri listrik mikro, polip karang membuka sempurna"
-			sub3 := "Endapan mineral kalsium karbonat menebal, percabangan tumbuh 2.5 cm"
-			sub6 := "Koloni karang mandiri, ikan karang dan anemon mulai berkoloni di sekitar fragmen"
+			sub1 := "Jadwal monitoring bulan ke-1: Target pemantauan adaptasi substrat dan polip karang"
+			sub3 := "Jadwal monitoring bulan ke-3: Target pemantauan percabangan dan kalsifikasi struktur"
+			sub6 := "Jadwal monitoring bulan ke-6: Target pemantauan koloni mandiri dan biota karang"
 
 			milestones = append(milestones,
 				unitMilestoneItem{
 					MilestoneMonth:    1,
 					MilestoneTitle:    "Bulan 1: Penempelan & Adaptasi Substrat",
 					MediaURL:          defaultPhoto,
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub1,
 					CapturedAt:        plantedTime.AddDate(0, 1, 0).Format(time.RFC3339),
 				},
 				unitMilestoneItem{
 					MilestoneMonth:    3,
 					MilestoneTitle:    "Bulan 3: Pertumbuhan Cabang & Kalsifikasi",
-					MediaURL:          "https://images.unsplash.com/photo-1582967788606-a171c1080cb0",
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					MediaURL:          defaultPhoto,
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub3,
 					CapturedAt:        plantedTime.AddDate(0, 3, 0).Format(time.RFC3339),
 				},
 				unitMilestoneItem{
 					MilestoneMonth:    6,
 					MilestoneTitle:    "Bulan 6: Koloni Mandiri & Ekosistem Mikro",
-					MediaURL:          "https://images.unsplash.com/photo-1682687220063-4742bd7fd538",
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					MediaURL:          defaultPhoto,
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub6,
 					CapturedAt:        plantedTime.AddDate(0, 6, 0).Format(time.RFC3339),
 				},
@@ -538,67 +538,67 @@ func (h *Handler) handleListMyUnits(w http.ResponseWriter, r *http.Request) {
 
 		milestones := make([]unitMilestoneItem, 0, 3)
 		if du.ProjectCategory == "mangrove" {
-			sub1 := "Bibit Rhizophora ditanam di lumpur pesisir dengan ajir bambu pelindung"
-			sub3 := "Akar tunjang mulai mencengkeram substrat, daun bertunas 4-6 helai baru"
-			sub6 := "Sabuk hijau mangrove rapat menahan abrasi ombak dan menyerap karbon biru"
+			sub1 := "Jadwal monitoring bulan ke-1: Target pemantauan bibit mangrove dan ajir pelindung"
+			sub3 := "Jadwal monitoring bulan ke-3: Target pemantauan perkembangan akar tunjang dan helai daun"
+			sub6 := "Jadwal monitoring bulan ke-6: Target pemantauan sabuk hijau mangrove pesisir"
 			milestones = append(milestones,
 				unitMilestoneItem{
 					MilestoneMonth:    1,
 					MilestoneTitle:    "Bulan 1: Penanaman Bibit Mangrove",
 					MediaURL:          du.ProjectImageUrl,
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub1,
 					CapturedAt:        paidTime.AddDate(0, 1, 0).Format(time.RFC3339),
 				},
 				unitMilestoneItem{
 					MilestoneMonth:    3,
 					MilestoneTitle:    "Bulan 3: Perkembangan Akar Tunjang",
-					MediaURL:          "https://images.unsplash.com/photo-1544551763-77ef2d0cfc6c",
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					MediaURL:          du.ProjectImageUrl,
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub3,
 					CapturedAt:        paidTime.AddDate(0, 3, 0).Format(time.RFC3339),
 				},
 				unitMilestoneItem{
 					MilestoneMonth:    6,
 					MilestoneTitle:    "Bulan 6: Pemantapan Sabuk Hijau Pesisir",
-					MediaURL:          "https://images.unsplash.com/photo-1559827291-72ee739d0d9a",
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					MediaURL:          du.ProjectImageUrl,
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub6,
 					CapturedAt:        paidTime.AddDate(0, 6, 0).Format(time.RFC3339),
 				},
 			)
 		} else {
-			sub1 := "Bibit pohon ditanam pada bedengan lereng dengan mulsa organik"
-			sub3 := "Batang mengeras dan bertambah tinggi 40 cm, perakaran menembus tanah dalam"
-			sub6 := "Kanopi rimbun menaungi tanah lereng dan mengikat resapan air tanah pegunungan"
+			sub1 := "Jadwal monitoring bulan ke-1: Target pemantauan bibit pohon di lereng"
+			sub3 := "Jadwal monitoring bulan ke-3: Target pemantauan penguatan batang dan perakaran tanah dalam"
+			sub6 := "Jadwal monitoring bulan ke-6: Target pemantauan pembentukan kanopi dan resapan air"
 			milestones = append(milestones,
 				unitMilestoneItem{
 					MilestoneMonth:    1,
 					MilestoneTitle:    "Bulan 1: Penanaman Pohon di Lereng",
 					MediaURL:          du.ProjectImageUrl,
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub1,
 					CapturedAt:        paidTime.AddDate(0, 1, 0).Format(time.RFC3339),
 				},
 				unitMilestoneItem{
 					MilestoneMonth:    3,
 					MilestoneTitle:    "Bulan 3: Penguatan Batang & Perakaran",
-					MediaURL:          "https://images.unsplash.com/photo-1513836279014-a89f7a76ae86",
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					MediaURL:          du.ProjectImageUrl,
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub3,
 					CapturedAt:        paidTime.AddDate(0, 3, 0).Format(time.RFC3339),
 				},
 				unitMilestoneItem{
 					MilestoneMonth:    6,
 					MilestoneTitle:    "Bulan 6: Pembentukan Kanopi & Konservasi Air",
-					MediaURL:          "https://images.unsplash.com/photo-1502082553048-f009c37129b9",
-					IsVerifiedHealthy: true,
-					HealthStatus:      "healthy",
+					MediaURL:          du.ProjectImageUrl,
+					IsVerifiedHealthy: false,
+					HealthStatus:      "scheduled",
 					SubtitleMetrics:   &sub6,
 					CapturedAt:        paidTime.AddDate(0, 6, 0).Format(time.RFC3339),
 				},

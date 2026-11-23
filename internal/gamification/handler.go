@@ -507,9 +507,8 @@ func (h *Handler) listMissions(w http.ResponseWriter, r *http.Request) {
 				conf, _ := decimalutil.FromNumeric(m.CvMinConfidence).Float64()
 
 				var lastStatus *string
-				if len(m.MyLastSubmissionStatus) > 0 {
-					s := string(m.MyLastSubmissionStatus)
-					lastStatus = &s
+				if m.MyLastSubmissionStatus != "" {
+					lastStatus = &m.MyLastSubmissionStatus
 				}
 
 				items = append(items, missionResponseItem{
@@ -679,9 +678,16 @@ func (h *Handler) submitMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	message := "Proof photo received. Computer vision verification in progress."
+	message := "Proof photo verified successfully."
 	if res.Status == store.SubmissionStatusNeedsReview {
 		message = "Proof photo received. Automated checker was unavailable, queued for review."
+	} else if res.Status == store.SubmissionStatusRejected {
+		message = "Proof photo could not be verified."
+		if res.RejectionNotes != "" {
+			message += " " + res.RejectionNotes
+		}
+	} else if res.Status == store.SubmissionStatusPending || res.Status == store.SubmissionStatusProcessing {
+		message = "Proof photo received. Computer vision verification in progress."
 	}
 
 	// Returns 202 Accepted with MissionSubmissionReceipt as defined in OpenAPI spec

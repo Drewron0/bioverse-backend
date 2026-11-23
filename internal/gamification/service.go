@@ -142,10 +142,11 @@ func (v *HTTPCVVerifier) VerifyProof(ctx context.Context, targetLabel string, mi
 
 // Service coordinates virtual pet actions, streaks, eco-missions, and points.
 type Service struct {
-	pool          *pgxpool.Pool
-	store         store.Querier
-	cvVerifier    ComputerVisionVerifier
-	imageResolver func(string) string
+	pool                *pgxpool.Pool
+	store               store.Querier
+	cvVerifier          ComputerVisionVerifier
+	imageResolver       func(string) string
+	fallbackAutoApprove bool
 }
 
 // NewService constructs a gamification domain service.
@@ -154,10 +155,16 @@ func NewService(pool *pgxpool.Pool, q store.Querier, verifier ComputerVisionVeri
 		verifier = &StubCVVerifier{}
 	}
 	return &Service{
-		pool:       pool,
-		store:      q,
-		cvVerifier: verifier,
+		pool:                pool,
+		store:               q,
+		cvVerifier:          verifier,
+		fallbackAutoApprove: true,
 	}
+}
+
+// SetFallbackAutoApprove controls whether to auto-approve submissions via stub when CV service is unreachable.
+func (s *Service) SetFallbackAutoApprove(enabled bool) {
+	s.fallbackAutoApprove = enabled
 }
 
 // SetImageResolver assigns a resolver function for translating object keys to downloadable URLs.
@@ -439,14 +446,50 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 
 	cvRes, cvErr := s.cvVerifier.VerifyProof(ctx, targetLabel, minConfidence, verifyURL)
 	if cvErr != nil {
-		// External CV inference service is unavailable or unconfigured.
-		// Fallback to simulated automated verification so user experience, rewards, and streak progression are not blocked.
-		stub := &StubCVVerifier{}
-		stubRes, _ := stub.VerifyProof(ctx, targetLabel, minConfidence, verifyURL)
-		stubRes.JobID = fmt.Sprintf("cv-fallback-%d", time.Now().UnixNano())
-		stubRes.ModelVersion = "bioverse-cv-fallback-v1.0"
-		stubRes.RawResponse = []byte(fmt.Sprintf(`{"fallback_reason": %q, "status": "fallback_approved"}`, cvErr.Error()))
-		cvRes = stubRes
+		if s.fallbackAutoApprove {
+			// External CV inference service is unavailable or unconfigured.
+			// Fallback to simulated automated verification so user experience, rewards, and streak progression are not blocked during testing.
+			stub := &StubCVVerifier{}
+			stubRes, _ := stub.VerifyProof(ctx, targetLabel, minConfidence, verifyURL)
+			stubRes.JobID = fmt.Sprintf("cv-fallback-%d", time.Now().UnixNano())
+			stubRes.ModelVersion = "bioverse-cv-fallback-v1.0"
+			stubRes.RawResponse = []byte(fmt.Sprintf(`{"fallback_reason": %q, "status": "fallback_approved"}`, cvErr.Error()))
+			cvRes = stubRes
+		} else {
+			// In strict production mode without fallback approval, save as needs_review for manual staff review.
+			submissionID, _ := uuid.NewV7()
+			imageHash := hashString(proofImageURL)
+			var result MissionSubmissionResult
+			result.SubmissionID = submissionID
+			result.MissionID = missionID
+			result.Status = store.SubmissionStatusNeedsReview
+
+			err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+				txStore := store.New(tx)
+				_, errSave := txStore.CreateMissionSubmission(ctx, store.CreateMissionSubmissionParams{
+					ID:                submissionID,
+					UserID:            userID,
+					MissionID:         missionID,
+					PetID:             uuidToPgUUID(targetPetID),
+					SubmissionDate:    todayDate,
+					ProofImageUrl:     pgtype.Text{String: proofImageURL, Valid: true},
+					ImageHash:         pgtype.Text{String: imageHash, Valid: true},
+					Status:            store.SubmissionStatusNeedsReview,
+					CvJobID:           pgtype.Text{String: "manual-review-fallback", Valid: true},
+					CvModelVersion:    pgtype.Text{String: "fallback", Valid: true},
+					CvConfidenceScore: decimalutil.ToNumeric(decimal.Zero),
+					CvRawResponse:     []byte(fmt.Sprintf(`{"fallback_reason": %q}`, cvErr.Error())),
+					AwardedPoints:     0,
+					AwardedXp:         0,
+					VerifiedAt:        pgtype.Timestamptz{Valid: false},
+				})
+				return errSave
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to save needs_review submission: %w", err)
+			}
+			return &result, nil
+		}
 	}
 
 	imageHash := hashString(proofImageURL)

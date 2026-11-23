@@ -86,13 +86,13 @@ ORDER BY is_daily DESC, points_reward ASC;
 SELECT m.id, m.sponsor_company_id, m.title, m.description, m.instructions, m.category, m.difficulty, m.image_url,
        m.points_reward, m.xp_reward, m.requires_camera_proof, m.cv_target_label, m.cv_min_confidence, m.is_daily, m.is_active, 
        m.estimated_minutes, m.created_at,
-       (
+       COALESCE((
            SELECT s.status::text 
            FROM user_mission_submissions s 
            WHERE s.mission_id = m.id AND s.user_id = $1
            ORDER BY s.submitted_at DESC 
            LIMIT 1
-       ) AS my_last_submission_status,
+       ), '')::text AS my_last_submission_status,
        EXISTS (
            SELECT 1 
            FROM user_mission_submissions s 

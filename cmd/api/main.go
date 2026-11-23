@@ -200,6 +200,11 @@ func setupRouter(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool) http.Ha
 			cvVerifier = &gamification.StubCVVerifier{}
 		}
 		gamificationService := gamification.NewService(db, queries, cvVerifier)
+		fallbackAutoApprove := true
+		if val := os.Getenv("CV_FALLBACK_AUTO_APPROVE"); val != "" {
+			fallbackAutoApprove = strings.ToLower(strings.TrimSpace(val)) == "true" || val == "1"
+		}
+		gamificationService.SetFallbackAutoApprove(fallbackAutoApprove)
 		gamificationService.SetImageResolver(func(key string) string {
 			if strings.HasPrefix(key, "http://") || strings.HasPrefix(key, "https://") {
 				return key
