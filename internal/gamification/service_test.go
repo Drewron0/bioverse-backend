@@ -87,6 +87,10 @@ func TestGamificationEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to insert test eco mission: %v", err)
 	}
+	defer func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM user_mission_submissions WHERE mission_id = $1", missionID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM eco_missions WHERE id = $1", missionID)
+	}()
 
 	// 5. Submit eco-mission proof
 	subResult, err := gamifySvc.SubmitMissionProof(ctx, userID, missionID, &petAcep.ID, "https://storage.bioverse.id/proofs/tumbler123.jpg")

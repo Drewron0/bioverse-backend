@@ -371,6 +371,38 @@ func (h *Handler) getSpecies(w http.ResponseWriter, r *http.Request) {
 			"element":          "seagrass",
 			"rarity":           "rare",
 		},
+		{
+			"species_id":       "hornbill",
+			"name":             "Burung Rangkong (Hornbill)",
+			"description":      "Petani hutan sejati yang menebar benih dan menjaga kanopi pepohonan tinggi.",
+			"avatar_asset_url": "https://images.unsplash.com/photo-1549608276-5786777e6587",
+			"element":          "canopy",
+			"rarity":           "rare",
+		},
+		{
+			"species_id":       "deer",
+			"name":             "Kancil Hutan (Forest Deer)",
+			"description":      "Sahabat rimba yang lincah, waspada, dan menjaga keseimbangan vegetasi lantai hutan.",
+			"avatar_asset_url": "https://images.unsplash.com/photo-1484406566174-9da000fda645",
+			"element":          "forest",
+			"rarity":           "common",
+		},
+		{
+			"species_id":       "orangutan",
+			"name":             "Orangutan (Forest Guardian)",
+			"description":      "Penjaga rimba tropis nusantara yang cerdas, bijak, dan penuh kasih sayang.",
+			"avatar_asset_url": "https://images.unsplash.com/photo-1540573133985-87b6da6d54a9",
+			"element":          "jungle",
+			"rarity":           "epic",
+		},
+		{
+			"species_id":       "sun_bear",
+			"name":             "Beruang Madu (Sun Bear)",
+			"description":      "Pemanjat pohon ulung penjelajah hutan tropis yang tangguh dan ceria.",
+			"avatar_asset_url": "https://images.unsplash.com/photo-1589656966895-2f33e7653819",
+			"element":          "highland",
+			"rarity":           "rare",
+		},
 	}
 	writeJSON(w, http.StatusOK, species)
 }

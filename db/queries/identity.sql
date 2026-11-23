@@ -230,7 +230,7 @@ SELECT
     COALESCE((
         SELECT COUNT(*) 
         FROM user_mission_submissions ms 
-        WHERE ms.user_id = u.id AND ms.status = 'approved'
+        WHERE ms.user_id = u.id AND ms.status = 'verified'
     ), 0)::bigint AS missions_completed
 FROM users u
 LEFT JOIN user_streaks s ON u.id = s.user_id

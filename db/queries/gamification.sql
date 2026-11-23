@@ -87,7 +87,7 @@ SELECT m.id, m.sponsor_company_id, m.title, m.description, m.instructions, m.cat
        m.points_reward, m.xp_reward, m.requires_camera_proof, m.cv_target_label, m.cv_min_confidence, m.is_daily, m.is_active, 
        m.estimated_minutes, m.created_at,
        (
-           SELECT s.status 
+           SELECT s.status::text 
            FROM user_mission_submissions s 
            WHERE s.mission_id = m.id AND s.user_id = $1
            ORDER BY s.submitted_at DESC 
@@ -96,7 +96,7 @@ SELECT m.id, m.sponsor_company_id, m.title, m.description, m.instructions, m.cat
        EXISTS (
            SELECT 1 
            FROM user_mission_submissions s 
-           WHERE s.mission_id = m.id AND s.user_id = $1 AND s.submission_date = CURRENT_DATE AND s.status = 'approved'
+           WHERE s.mission_id = m.id AND s.user_id = $1 AND s.submission_date = CURRENT_DATE AND s.status != 'rejected'
        ) AS completed_today
 FROM eco_missions m
 WHERE m.is_active = true
