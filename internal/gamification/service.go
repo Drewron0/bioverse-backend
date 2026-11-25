@@ -33,6 +33,10 @@ var (
 	ErrMissionAlreadyCompletedToday = errors.New("mission already submitted or completed for today")
 	// ErrInvalidProofImage indicates proof image URL or data is empty.
 	ErrInvalidProofImage = errors.New("proof image is required")
+	// ErrSubmissionNotFound indicates the mission submission was not found.
+	ErrSubmissionNotFound = errors.New("mission submission not found")
+	// ErrSubmissionAlreadyReviewed indicates the mission submission is no longer pending review.
+	ErrSubmissionAlreadyReviewed = errors.New("mission submission has already been reviewed")
 )
 
 // ComputerVisionVerifier defines the contract for verifying eco-mission camera proofs.
@@ -344,6 +348,32 @@ func (s *Service) ListActiveMissions(ctx context.Context) ([]store.ListActiveMis
 	return s.store.ListActiveMissions(ctx)
 }
 
+// ListActiveMissionsForUser returns active eco-missions enriched with the user's submission status
+// and completion flag evaluated against the user's local timezone date.
+func (s *Service) ListActiveMissionsForUser(ctx context.Context, userID uuid.UUID) ([]store.ListActiveMissionsForUserRow, error) {
+	tz := "UTC"
+	if user, err := s.store.GetUserByID(ctx, userID); err == nil && user.Timezone != "" {
+		tz = user.Timezone
+	}
+	todayDate := localDateForTimezone(tz)
+	return s.store.ListActiveMissionsForUser(ctx, store.ListActiveMissionsForUserParams{
+		UserID:         userID,
+		SubmissionDate: todayDate,
+	})
+}
+
+func localDateForTimezone(tz string) pgtype.Date {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	nowLocal := time.Now().In(loc)
+	return pgtype.Date{
+		Time:  time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, time.UTC),
+		Valid: true,
+	}
+}
+
 // MissionSubmissionResult represents the outcome of submitting an eco-mission proof.
 type MissionSubmissionResult struct {
 	SubmissionID   uuid.UUID
@@ -376,15 +406,7 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 	}
 
 	// Calculate user local date according to their timezone
-	loc, err := time.LoadLocation(user.Timezone)
-	if err != nil {
-		loc = time.UTC
-	}
-	userToday := time.Now().In(loc)
-	todayDate := pgtype.Date{
-		Time:  time.Date(userToday.Year(), userToday.Month(), userToday.Day(), 0, 0, 0, 0, time.UTC),
-		Valid: true,
-	}
+	todayDate := localDateForTimezone(user.Timezone)
 
 	// Default to primary pet if targetPetID is not provided, or verify ownership if provided
 	if targetPetID != nil {
@@ -530,20 +552,7 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 		}
 
 		// Calculate XP boost if pet is selected
-		awardedXp := mission.XpReward
-		if targetPetID != nil {
-			boosts, err := txStore.ListActivePetBoosts(ctx, *targetPetID)
-			if err == nil {
-				multiplier := decimal.NewFromInt(1)
-				for _, b := range boosts {
-					mult := decimalutil.FromNumeric(b.XpMultiplier)
-					if mult.GreaterThan(multiplier) {
-						multiplier = mult
-					}
-				}
-				awardedXp = decimal.NewFromInt(mission.XpReward).Mul(multiplier).IntPart()
-			}
-		}
+		awardedXp := calculateBoostedXP(ctx, txStore, mission.XpReward, targetPetID)
 
 		nowUtc := time.Now().UTC()
 		// Save approved submission
@@ -568,72 +577,18 @@ func (s *Service) SubmitMissionProof(ctx context.Context, userID, missionID uuid
 			return fmt.Errorf("failed to save approved submission: %w", err)
 		}
 
-		// 1. Credit Points to user
-		updatedUser, err := txStore.CreditUserPoints(ctx, store.CreditUserPointsParams{
-			ID:            userID,
-			PointsBalance: mission.PointsReward,
-		})
+		currentStreak, err := creditMissionRewardsTx(
+			ctx, txStore, userID, targetPetID, submissionID,
+			mission.Title, mission.PointsReward, awardedXp, todayDate, nowUtc,
+		)
 		if err != nil {
-			return fmt.Errorf("failed to credit points: %w", err)
-		}
-
-		// 2. Insert Point Ledger entry
-		ledgerID, _ := uuid.NewV7()
-		_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
-			ID:              ledgerID,
-			UserID:          userID,
-			TransactionType: store.PointTxTypeEarnMission,
-			Amount:          mission.PointsReward,
-			BalanceAfter:    updatedUser.PointsBalance,
-			ReferenceType:   "mission_submission",
-			ReferenceID:     submissionID,
-			Description:     fmt.Sprintf("Reward for eco-mission: %s", mission.Title),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create points ledger entry: %w", err)
-		}
-
-		// 3. Update target pet XP and Level if assigned
-		if targetPetID != nil {
-			pet, err := txStore.GetVirtualPetByID(ctx, store.GetVirtualPetByIDParams{
-				ID:     *targetPetID,
-				UserID: userID,
-			})
-			if err == nil {
-				newXp := pet.ExperiencePoints + awardedXp
-				newLevel := calculatePetLevel(newXp)
-				newStage := calculateGrowthStage(newLevel)
-				_, _ = txStore.UpdateVirtualPetHealthAndXP(ctx, store.UpdateVirtualPetHealthAndXPParams{
-					ID:               *targetPetID,
-					UserID:           userID,
-					HealthPercent:    pet.HealthPercent,
-					ExperiencePoints: newXp,
-					Level:            newLevel,
-					GrowthStage:      newStage,
-					LastInteractedAt: pgtype.Timestamptz{Time: nowUtc, Valid: true},
-				})
-			}
-		}
-
-		// 4. Update User Daily Streak
-		streak, err := txStore.GetUserStreakByUserID(ctx, userID)
-		if err == nil {
-			newStreak, longestStreak := calculateNewStreak(streak, todayDate.Time)
-			upStreak, err := txStore.UpdateUserStreak(ctx, store.UpdateUserStreakParams{
-				UserID:             userID,
-				CurrentStreak:      newStreak,
-				LongestStreak:      longestStreak,
-				LastStreakDate:     todayDate,
-				LastFreezeUsedDate: streak.LastFreezeUsedDate,
-			})
-			if err == nil {
-				result.CurrentStreak = upStreak.CurrentStreak
-			}
+			return err
 		}
 
 		result.Status = store.SubmissionStatusVerified
 		result.AwardedPoints = mission.PointsReward
 		result.AwardedXP = awardedXp
+		result.CurrentStreak = currentStreak
 		result.VerifiedAt = &nowUtc
 		return nil
 	})
@@ -905,4 +860,208 @@ func (s *Service) UpdateMission(ctx context.Context, id uuid.UUID, title, desc, 
 		return nil, fmt.Errorf("failed to update eco-mission: %w", err)
 	}
 	return &m, nil
+}
+
+// ResolveProofURL translates a storage object key into a downloadable URL using the configured resolver.
+func (s *Service) ResolveProofURL(raw string) string {
+	if raw == "" || s.imageResolver == nil {
+		return raw
+	}
+	if resolved := s.imageResolver(raw); resolved != "" {
+		return resolved
+	}
+	return raw
+}
+
+func calculateBoostedXP(ctx context.Context, txStore store.Querier, baseXP int64, targetPetID *uuid.UUID) int64 {
+	if targetPetID == nil {
+		return baseXP
+	}
+	boosts, err := txStore.ListActivePetBoosts(ctx, *targetPetID)
+	if err != nil {
+		return baseXP
+	}
+	multiplier := decimal.NewFromInt(1)
+	for _, b := range boosts {
+		mult := decimalutil.FromNumeric(b.XpMultiplier)
+		if mult.GreaterThan(multiplier) {
+			multiplier = mult
+		}
+	}
+	return decimal.NewFromInt(baseXP).Mul(multiplier).IntPart()
+}
+
+func creditMissionRewardsTx(
+	ctx context.Context,
+	txStore store.Querier,
+	userID uuid.UUID,
+	targetPetID *uuid.UUID,
+	submissionID uuid.UUID,
+	missionTitle string,
+	pointsReward, awardedXP int64,
+	streakDate pgtype.Date,
+	nowUtc time.Time,
+) (int32, error) {
+	updatedUser, err := txStore.CreditUserPoints(ctx, store.CreditUserPointsParams{
+		ID:            userID,
+		PointsBalance: pointsReward,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to credit points: %w", err)
+	}
+
+	ledgerID, _ := uuid.NewV7()
+	_, err = txStore.CreatePointLedgerEntry(ctx, store.CreatePointLedgerEntryParams{
+		ID:              ledgerID,
+		UserID:          userID,
+		TransactionType: store.PointTxTypeEarnMission,
+		Amount:          pointsReward,
+		BalanceAfter:    updatedUser.PointsBalance,
+		ReferenceType:   "mission_submission",
+		ReferenceID:     submissionID,
+		Description:     fmt.Sprintf("Reward for eco-mission: %s", missionTitle),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to create points ledger entry: %w", err)
+	}
+
+	if targetPetID != nil {
+		pet, err := txStore.GetVirtualPetByID(ctx, store.GetVirtualPetByIDParams{
+			ID:     *targetPetID,
+			UserID: userID,
+		})
+		if err == nil {
+			newXp := pet.ExperiencePoints + awardedXP
+			newLevel := calculatePetLevel(newXp)
+			newStage := calculateGrowthStage(newLevel)
+			_, _ = txStore.UpdateVirtualPetHealthAndXP(ctx, store.UpdateVirtualPetHealthAndXPParams{
+				ID:               *targetPetID,
+				UserID:           userID,
+				HealthPercent:    pet.HealthPercent,
+				ExperiencePoints: newXp,
+				Level:            newLevel,
+				GrowthStage:      newStage,
+				LastInteractedAt: pgtype.Timestamptz{Time: nowUtc, Valid: true},
+			})
+		}
+	}
+
+	var currentStreak int32
+	streak, err := txStore.GetUserStreakByUserID(ctx, userID)
+	if err == nil {
+		newStreak, longestStreak := calculateNewStreak(streak, streakDate.Time)
+		upStreak, err := txStore.UpdateUserStreak(ctx, store.UpdateUserStreakParams{
+			UserID:             userID,
+			CurrentStreak:      newStreak,
+			LongestStreak:      longestStreak,
+			LastStreakDate:     streakDate,
+			LastFreezeUsedDate: streak.LastFreezeUsedDate,
+		})
+		if err == nil {
+			currentStreak = upStreak.CurrentStreak
+		}
+	}
+
+	return currentStreak, nil
+}
+
+// ListSubmissionsForAdmin returns mission proof submissions filtered optionally by verification status.
+func (s *Service) ListSubmissionsForAdmin(ctx context.Context, status *store.SubmissionStatus, limit, offset int32) ([]store.ListSubmissionsForAdminRow, error) {
+	var filter store.NullSubmissionStatus
+	if status != nil {
+		filter = store.NullSubmissionStatus{SubmissionStatus: *status, Valid: true}
+	}
+	return s.store.ListSubmissionsForAdmin(ctx, store.ListSubmissionsForAdminParams{
+		Limit:  limit,
+		Offset: offset,
+		Status: filter,
+	})
+}
+
+// ReviewMissionSubmission lets an administrator approve or reject a pending/needs_review submission,
+// atomically transitioning status and crediting rewards when approved.
+func (s *Service) ReviewMissionSubmission(ctx context.Context, submissionID uuid.UUID, approve bool, rejectionReason string) (*MissionSubmissionResult, error) {
+	sub, err := s.store.GetMissionSubmissionForAdmin(ctx, submissionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSubmissionNotFound
+		}
+		return nil, fmt.Errorf("failed to load submission: %w", err)
+	}
+
+	if sub.Status != store.SubmissionStatusNeedsReview &&
+		sub.Status != store.SubmissionStatusPending &&
+		sub.Status != store.SubmissionStatusProcessing {
+		return nil, ErrSubmissionAlreadyReviewed
+	}
+
+	var targetPetID *uuid.UUID
+	if sub.PetID.Valid {
+		pID := uuid.UUID(sub.PetID.Bytes)
+		targetPetID = &pID
+	}
+
+	var result MissionSubmissionResult
+	result.SubmissionID = sub.ID
+	result.MissionID = sub.MissionID
+
+	err = database.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		txStore := store.New(tx)
+		nowUtc := time.Now().UTC()
+
+		if !approve {
+			_, err := txStore.ReviewMissionSubmission(ctx, store.ReviewMissionSubmissionParams{
+				ID:              sub.ID,
+				Status:          store.SubmissionStatusRejected,
+				AwardedPoints:   0,
+				AwardedXp:       0,
+				RejectionReason: pgtype.Text{String: rejectionReason, Valid: rejectionReason != ""},
+			})
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrSubmissionAlreadyReviewed
+				}
+				return fmt.Errorf("failed to reject submission: %w", err)
+			}
+			result.Status = store.SubmissionStatusRejected
+			result.RejectionNotes = rejectionReason
+			result.VerifiedAt = &nowUtc
+			return nil
+		}
+
+		awardedXp := calculateBoostedXP(ctx, txStore, sub.MissionXpReward, targetPetID)
+		_, err := txStore.ReviewMissionSubmission(ctx, store.ReviewMissionSubmissionParams{
+			ID:              sub.ID,
+			Status:          store.SubmissionStatusVerified,
+			AwardedPoints:   sub.MissionPointsReward,
+			AwardedXp:       awardedXp,
+			RejectionReason: pgtype.Text{Valid: false},
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrSubmissionAlreadyReviewed
+			}
+			return fmt.Errorf("failed to verify submission: %w", err)
+		}
+
+		currentStreak, err := creditMissionRewardsTx(
+			ctx, txStore, sub.UserID, targetPetID, sub.ID,
+			sub.MissionTitle, sub.MissionPointsReward, awardedXp, sub.SubmissionDate, nowUtc,
+		)
+		if err != nil {
+			return err
+		}
+
+		result.Status = store.SubmissionStatusVerified
+		result.AwardedPoints = sub.MissionPointsReward
+		result.AwardedXP = awardedXp
+		result.CurrentStreak = currentStreak
+		result.VerifiedAt = &nowUtc
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }

@@ -73,6 +73,7 @@ type Querier interface {
 	GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) ([]GetLeaderboardRow, error)
 	GetMissionByID(ctx context.Context, id uuid.UUID) (GetMissionByIDRow, error)
 	GetMissionSubmissionByID(ctx context.Context, arg GetMissionSubmissionByIDParams) (UserMissionSubmissions, error)
+	GetMissionSubmissionForAdmin(ctx context.Context, id uuid.UUID) (GetMissionSubmissionForAdminRow, error)
 	GetNewsArticleByID(ctx context.Context, id uuid.UUID) (NewsArticles, error)
 	GetOpenSpiderFrameForZone(ctx context.Context, zoneID uuid.UUID) (GetOpenSpiderFrameForZoneRow, error)
 	GetOperatorPayoutByID(ctx context.Context, id uuid.UUID) (OperatorPayouts, error)
@@ -102,7 +103,7 @@ type Querier interface {
 	ListActiveCurrencies(ctx context.Context) ([]Currencies, error)
 	ListActiveDigitalProducts(ctx context.Context, currencyCode string) ([]ListActiveDigitalProductsRow, error)
 	ListActiveMissions(ctx context.Context) ([]ListActiveMissionsRow, error)
-	ListActiveMissionsForUser(ctx context.Context, userID uuid.UUID) ([]ListActiveMissionsForUserRow, error)
+	ListActiveMissionsForUser(ctx context.Context, arg ListActiveMissionsForUserParams) ([]ListActiveMissionsForUserRow, error)
 	ListActivePetBoosts(ctx context.Context, petID uuid.UUID) ([]PetBoosts, error)
 	ListActiveSubscriptionPlans(ctx context.Context, currencyCode string) ([]ListActiveSubscriptionPlansRow, error)
 	ListAllMissions(ctx context.Context) ([]EcoMissions, error)
@@ -130,6 +131,7 @@ type Querier interface {
 	ListPendingMissionSubmissions(ctx context.Context, limit int32) ([]ListPendingMissionSubmissionsRow, error)
 	ListSpiderFramesByZoneID(ctx context.Context, zoneID uuid.UUID) ([]SpiderFrames, error)
 	ListSubmissionsByUserID(ctx context.Context, arg ListSubmissionsByUserIDParams) ([]ListSubmissionsByUserIDRow, error)
+	ListSubmissionsForAdmin(ctx context.Context, arg ListSubmissionsForAdminParams) ([]ListSubmissionsForAdminRow, error)
 	ListUserAdoptedDonationUnits(ctx context.Context, userID uuid.UUID) ([]ListUserAdoptedDonationUnitsRow, error)
 	ListUserInventory(ctx context.Context, userID uuid.UUID) ([]ListUserInventoryRow, error)
 	ListUserSubscriptions(ctx context.Context, userID uuid.UUID) ([]ListUserSubscriptionsRow, error)
@@ -143,6 +145,7 @@ type Querier interface {
 	RecordAdminLoginFailure(ctx context.Context, id uuid.UUID) (RecordAdminLoginFailureRow, error)
 	RecordAdminLoginSuccess(ctx context.Context, id uuid.UUID) error
 	RecordWebhookEvent(ctx context.Context, arg RecordWebhookEventParams) (WebhookEvents, error)
+	ReviewMissionSubmission(ctx context.Context, arg ReviewMissionSubmissionParams) (UserMissionSubmissions, error)
 	RevokeAdminToken(ctx context.Context, tokenHash string) error
 	RevokeAllUserTokensForUser(ctx context.Context, arg RevokeAllUserTokensForUserParams) error
 	RevokeUserToken(ctx context.Context, id uuid.UUID) error

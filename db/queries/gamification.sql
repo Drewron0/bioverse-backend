@@ -96,7 +96,7 @@ SELECT m.id, m.sponsor_company_id, m.title, m.description, m.instructions, m.cat
        EXISTS (
            SELECT 1 
            FROM user_mission_submissions s 
-           WHERE s.mission_id = m.id AND s.user_id = $1 AND s.submission_date = CURRENT_DATE AND s.status != 'rejected'
+           WHERE s.mission_id = m.id AND s.user_id = $1 AND s.submission_date = $2 AND s.status != 'rejected'
        ) AS completed_today
 FROM eco_missions m
 WHERE m.is_active = true
@@ -235,3 +235,33 @@ RETURNING *;
 -- name: ListAllMissions :many
 SELECT * FROM eco_missions
 ORDER BY created_at DESC;
+
+-- name: ListSubmissionsForAdmin :many
+SELECT s.id, s.user_id, s.mission_id, s.pet_id, s.submission_date, s.proof_image_url,
+       s.status, s.cv_confidence_score, s.cv_model_version, s.cv_raw_response,
+       s.awarded_points, s.awarded_xp, s.rejection_reason, s.submitted_at, s.verified_at,
+       u.email AS user_email, u.full_name AS user_full_name,
+       m.title AS mission_title, m.points_reward AS mission_points_reward, m.xp_reward AS mission_xp_reward
+FROM user_mission_submissions s
+JOIN users u ON s.user_id = u.id
+JOIN eco_missions m ON s.mission_id = m.id
+WHERE (sqlc.narg('status')::submission_status IS NULL OR s.status = sqlc.narg('status')::submission_status)
+ORDER BY s.submitted_at DESC
+LIMIT $1 OFFSET $2;
+
+-- name: GetMissionSubmissionForAdmin :one
+SELECT s.*, m.title AS mission_title, m.points_reward AS mission_points_reward, m.xp_reward AS mission_xp_reward
+FROM user_mission_submissions s
+JOIN eco_missions m ON s.mission_id = m.id
+WHERE s.id = $1
+LIMIT 1;
+
+-- name: ReviewMissionSubmission :one
+UPDATE user_mission_submissions
+SET status = $2,
+    awarded_points = $3,
+    awarded_xp = $4,
+    rejection_reason = $5,
+    verified_at = NOW()
+WHERE id = $1 AND status IN ('needs_review', 'pending', 'processing')
+RETURNING *;

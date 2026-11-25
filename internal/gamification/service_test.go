@@ -107,13 +107,86 @@ func TestGamificationEndToEnd(t *testing.T) {
 		t.Errorf("expected streak to advance to 1, got %d", subResult.CurrentStreak)
 	}
 
-	// 6. Verify user points balance updated
+	// 6. Verify user points balance updated and ListActiveMissionsForUser reflects completed_today
 	user, err := q.GetUserByID(ctx, userID)
 	if err != nil {
 		t.Fatalf("failed to get user: %v", err)
 	}
 	if user.PointsBalance != 50 {
 		t.Errorf("expected points balance 50, got %d", user.PointsBalance)
+	}
+
+	activeMissions, err := gamifySvc.ListActiveMissionsForUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("failed to list active missions for user: %v", err)
+	}
+	var foundTestMission bool
+	for _, am := range activeMissions {
+		if am.ID == missionID {
+			foundTestMission = true
+			if !am.CompletedToday {
+				t.Errorf("expected completed_today=true after submission, got false")
+			}
+			if am.MyLastSubmissionStatus != string(store.SubmissionStatusVerified) {
+				t.Errorf("expected my_last_submission_status=verified, got %q", am.MyLastSubmissionStatus)
+			}
+		}
+	}
+	if !foundTestMission {
+		t.Errorf("expected test mission %s in ListActiveMissionsForUser", missionID)
+	}
+
+	// 6b. Verify admin manual review queue & approval flow (for needs_review submissions)
+	reviewMissionID, _ := uuid.NewV7()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO eco_missions (
+			id, title, description, instructions, category, difficulty, points_reward, xp_reward, cv_target_label, cv_min_confidence, is_daily, is_active
+		) VALUES (
+			$1, 'Review Queue Test Mission', 'Test manual review', 'Upload proof', 'lifestyle', 'easy', 30, 15, 'test_label', 0.80, true, true
+		)
+	`, reviewMissionID)
+	if err != nil {
+		t.Fatalf("failed to insert review test eco mission: %v", err)
+	}
+	defer func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM user_mission_submissions WHERE mission_id = $1", reviewMissionID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM eco_missions WHERE id = $1", reviewMissionID)
+	}()
+
+	strictSvc := gamification.NewService(pool, q, gamification.NewHTTPCVVerifier("http://127.0.0.1:1"))
+	strictSvc.SetFallbackAutoApprove(false)
+	needsReviewRes, err := strictSvc.SubmitMissionProof(ctx, userID, reviewMissionID, &petAcep.ID, "mission_proofs/needs_review.png")
+	if err != nil {
+		t.Fatalf("failed to submit mission proof in strict mode: %v", err)
+	}
+	if needsReviewRes.Status != store.SubmissionStatusNeedsReview {
+		t.Fatalf("expected needs_review status when fallback auto approve is false, got %s", needsReviewRes.Status)
+	}
+
+	pendingFilter := store.SubmissionStatusNeedsReview
+	adminSubs, err := gamifySvc.ListSubmissionsForAdmin(ctx, &pendingFilter, 20, 0)
+	if err != nil {
+		t.Fatalf("failed to list submissions for admin: %v", err)
+	}
+	var foundInQueue bool
+	for _, s := range adminSubs {
+		if s.ID == needsReviewRes.SubmissionID {
+			foundInQueue = true
+		}
+	}
+	if !foundInQueue {
+		t.Errorf("expected submission %s in admin needs_review queue", needsReviewRes.SubmissionID)
+	}
+
+	reviewOut, err := gamifySvc.ReviewMissionSubmission(ctx, needsReviewRes.SubmissionID, true, "")
+	if err != nil {
+		t.Fatalf("failed to approve submission as admin: %v", err)
+	}
+	if reviewOut.Status != store.SubmissionStatusVerified || reviewOut.AwardedPoints != 30 {
+		t.Errorf("unexpected admin approval result: status=%s points=%d", reviewOut.Status, reviewOut.AwardedPoints)
+	}
+	if _, err := gamifySvc.ReviewMissionSubmission(ctx, needsReviewRes.SubmissionID, true, ""); err != gamification.ErrSubmissionAlreadyReviewed {
+		t.Errorf("expected ErrSubmissionAlreadyReviewed on duplicate review, got %v", err)
 	}
 
 	// 7. Verify leaderboard ranking and category filtering

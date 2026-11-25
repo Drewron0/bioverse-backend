@@ -3033,6 +3033,101 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/admin/gamification/submissions:
+    get:
+      tags:
+        - Admin Gamification
+      summary: List mission submissions for admin review
+      description: Retrieves user eco-mission proof submissions, optionally filtered by status (such as needs_review).
+      operationId: adminListMissionSubmissions
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/SubmissionStatus'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of mission submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminMissionSubmissionItem'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/admin/gamification/submissions/{id}/review:
+    post:
+      tags:
+        - Admin Gamification
+      summary: Approve or reject a mission submission
+      description: Manually verifies or rejects a mission proof submission in needs_review or pending status, crediting user points and pet XP on approval.
+      operationId: adminReviewMissionSubmission
+      security:
+        - AdminBearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Submission UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewMissionSubmissionRequest'
+      responses:
+        '200':
+          description: Submission review recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMissionReviewResult'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Submission has already been reviewed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/webhooks/xendit:
     post:
       tags:
@@ -4810,6 +4905,116 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    AdminMissionSubmissionItem:
+      type: object
+      required:
+        - id
+        - user_id
+        - user_email
+        - user_full_name
+        - mission_id
+        - mission_title
+        - proof_image_url
+        - status
+        - points_reward
+        - xp_reward
+        - awarded_points
+        - awarded_xp
+        - submitted_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        user_email:
+          type: string
+          format: email
+        user_full_name:
+          type: string
+        mission_id:
+          type: string
+          format: uuid
+        mission_title:
+          type: string
+        pet_id:
+          type: string
+          format: uuid
+          nullable: true
+        proof_image_url:
+          type: string
+        status:
+          $ref: '#/components/schemas/SubmissionStatus'
+        points_reward:
+          type: integer
+        xp_reward:
+          type: integer
+        awarded_points:
+          type: integer
+        awarded_xp:
+          type: integer
+        cv_confidence_score:
+          type: number
+          nullable: true
+        cv_model_version:
+          type: string
+          nullable: true
+        rejection_reason:
+          type: string
+          nullable: true
+        submitted_at:
+          type: string
+          format: date-time
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ReviewMissionSubmissionRequest:
+      type: object
+      required:
+        - decision
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+          example: approve
+        rejection_reason:
+          type: string
+          example: Photo does not clearly show the reusable bottle.
+
+    AdminMissionReviewResult:
+      type: object
+      required:
+        - submission_id
+        - mission_id
+        - status
+        - awarded_points
+        - awarded_xp
+        - current_streak
+      properties:
+        submission_id:
+          type: string
+          format: uuid
+        mission_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/SubmissionStatus'
+        awarded_points:
+          type: integer
+        awarded_xp:
+          type: integer
+        current_streak:
+          type: integer
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejection_notes:
+          type: string
 
     UserStreak:
       type: object

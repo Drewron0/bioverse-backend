@@ -267,6 +267,7 @@ func healthCheckHandler(db *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		if status == "degraded" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		} else {

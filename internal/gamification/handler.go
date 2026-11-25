@@ -63,6 +63,8 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMiddleware, adminMiddleware f
 		adminRouter.Use(identity.RequireAdminRole("super_admin", "operations", "content"))
 		adminRouter.Post("/v1/admin/gamification/missions", h.handleAdminCreateMission)
 		adminRouter.Put("/v1/admin/gamification/missions/{id}", h.handleAdminUpdateMission)
+		adminRouter.Get("/v1/admin/gamification/submissions", h.handleAdminListSubmissions)
+		adminRouter.Post("/v1/admin/gamification/submissions/{id}/review", h.handleAdminReviewSubmission)
 	})
 }
 
@@ -487,7 +489,7 @@ func (h *Handler) listMissions(w http.ResponseWriter, r *http.Request) {
 
 	userID, isAuth := identity.GetUserIDFromContext(r.Context())
 	if isAuth {
-		userMissions, err := h.service.store.ListActiveMissionsForUser(r.Context(), userID)
+		userMissions, err := h.service.ListActiveMissionsForUser(r.Context(), userID)
 		if err == nil {
 			items = make([]missionResponseItem, 0, len(userMissions))
 			for _, m := range userMissions {
@@ -1033,6 +1035,169 @@ func (h *Handler) handleAdminUpdateMission(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, m)
+}
+
+type adminSubmissionItem struct {
+	ID                string   `json:"id"`
+	UserID            string   `json:"user_id"`
+	UserEmail         string   `json:"user_email"`
+	UserFullName      string   `json:"user_full_name"`
+	MissionID         string   `json:"mission_id"`
+	MissionTitle      string   `json:"mission_title"`
+	PetID             *string  `json:"pet_id"`
+	ProofImageURL     string   `json:"proof_image_url"`
+	Status            string   `json:"status"`
+	PointsReward      int64    `json:"points_reward"`
+	XPReward          int64    `json:"xp_reward"`
+	AwardedPoints     int64    `json:"awarded_points"`
+	AwardedXP         int64    `json:"awarded_xp"`
+	CvConfidenceScore *float64 `json:"cv_confidence_score"`
+	CvModelVersion    *string  `json:"cv_model_version"`
+	RejectionReason   *string  `json:"rejection_reason"`
+	SubmittedAt       string   `json:"submitted_at"`
+	VerifiedAt        *string  `json:"verified_at"`
+}
+
+func (h *Handler) handleAdminListSubmissions(w http.ResponseWriter, r *http.Request) {
+	limit := int32(20)
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		if l > 100 {
+			limit = 100
+		} else {
+			limit = int32(l)
+		}
+	}
+	offset := int32(0)
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+		offset = int32(o)
+	}
+
+	var statusFilter *store.SubmissionStatus
+	if statusStr := strings.TrimSpace(r.URL.Query().Get("status")); statusStr != "" {
+		st := store.SubmissionStatus(statusStr)
+		switch st {
+		case store.SubmissionStatusPending,
+			store.SubmissionStatusProcessing,
+			store.SubmissionStatusVerified,
+			store.SubmissionStatusRejected,
+			store.SubmissionStatusNeedsReview:
+			statusFilter = &st
+		default:
+			httperr.BadRequest(w, r, "Invalid status filter", nil)
+			return
+		}
+	}
+
+	rows, err := h.service.ListSubmissionsForAdmin(r.Context(), statusFilter, limit, offset)
+	if err != nil {
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	items := make([]adminSubmissionItem, 0, len(rows))
+	for _, s := range rows {
+		var petIDStr *string
+		if s.PetID.Valid {
+			str := uuid.UUID(s.PetID.Bytes).String()
+			petIDStr = &str
+		}
+		var score *float64
+		if s.CvConfidenceScore.Valid {
+			f, _ := s.CvConfidenceScore.Float64Value()
+			score = &f.Float64
+		}
+		var modelVer *string
+		if s.CvModelVersion.Valid {
+			modelVer = &s.CvModelVersion.String
+		}
+		var rejReason *string
+		if s.RejectionReason.Valid {
+			rejReason = &s.RejectionReason.String
+		}
+		var verifiedAtStr *string
+		if s.VerifiedAt.Valid {
+			v := s.VerifiedAt.Time.UTC().Format(time.RFC3339)
+			verifiedAtStr = &v
+		}
+
+		items = append(items, adminSubmissionItem{
+			ID:                s.ID.String(),
+			UserID:            s.UserID.String(),
+			UserEmail:         s.UserEmail,
+			UserFullName:      s.UserFullName,
+			MissionID:         s.MissionID.String(),
+			MissionTitle:      s.MissionTitle,
+			PetID:             petIDStr,
+			ProofImageURL:     h.service.ResolveProofURL(s.ProofImageUrl.String),
+			Status:            string(s.Status),
+			PointsReward:      s.MissionPointsReward,
+			XPReward:          s.MissionXpReward,
+			AwardedPoints:     s.AwardedPoints,
+			AwardedXP:         s.AwardedXp,
+			CvConfidenceScore: score,
+			CvModelVersion:    modelVer,
+			RejectionReason:   rejReason,
+			SubmittedAt:       s.SubmittedAt.Time.UTC().Format(time.RFC3339),
+			VerifiedAt:        verifiedAtStr,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
+type reviewSubmissionRequest struct {
+	Decision        string `json:"decision"`
+	RejectionReason string `json:"rejection_reason"`
+}
+
+func (h *Handler) handleAdminReviewSubmission(w http.ResponseWriter, r *http.Request) {
+	subID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httperr.BadRequest(w, r, "Invalid submission UUID", nil)
+		return
+	}
+
+	var req reviewSubmissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httperr.BadRequest(w, r, "Invalid request body", nil)
+		return
+	}
+
+	decision := strings.ToLower(strings.TrimSpace(req.Decision))
+	if decision != "approve" && decision != "reject" {
+		httperr.BadRequest(w, r, "decision must be 'approve' or 'reject'", nil)
+		return
+	}
+	approve := decision == "approve"
+	reason := strings.TrimSpace(req.RejectionReason)
+	if !approve && reason == "" {
+		reason = "Submission rejected by moderator"
+	}
+
+	res, err := h.service.ReviewMissionSubmission(r.Context(), subID, approve, reason)
+	if err != nil {
+		if errors.Is(err, ErrSubmissionNotFound) {
+			httperr.NotFound(w, r, "Mission submission not found")
+			return
+		}
+		if errors.Is(err, ErrSubmissionAlreadyReviewed) {
+			httperr.Conflict(w, r, "Mission submission has already been reviewed")
+			return
+		}
+		httperr.InternalServerError(w, r)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"submission_id":   res.SubmissionID,
+		"mission_id":      res.MissionID,
+		"status":          res.Status,
+		"awarded_points":  res.AwardedPoints,
+		"awarded_xp":      res.AwardedXP,
+		"current_streak":  res.CurrentStreak,
+		"verified_at":     res.VerifiedAt,
+		"rejection_notes": res.RejectionNotes,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
